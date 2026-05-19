@@ -49,9 +49,9 @@ function generateRoomId() {
 io.on('connection', (socket) => {
   let currentRoomId = null
 
-  socket.on('create-room', () => {
+  socket.on('create-room', ({ displayName } = {}) => {
     const roomId = generateRoomId()
-    rooms.set(roomId, { peers: [socket.id] })
+    rooms.set(roomId, { peers: [socket.id], creatorDisplayName: displayName || null })
     currentRoomId = roomId
     socket.join(roomId)
     socket.emit('room-created', { roomId })
@@ -78,8 +78,8 @@ io.on('connection', (socket) => {
     room.peers.push(socket.id)
     currentRoomId = roomId
     socket.join(roomId)
-    socket.emit('room-joined', { roomId })
-    // Relay display name so creator can show "Incoming from [name]"
+    socket.emit('room-joined', { roomId, creatorDisplayName: room.creatorDisplayName })
+    // Relay joiner's display name so creator can show "Incoming from [name]"
     socket.to(roomId).emit('peer-joined', { displayName: displayName || null })
   })
 

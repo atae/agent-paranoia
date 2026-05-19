@@ -41,6 +41,22 @@
     #peerStatus.ok  { color: #1a7a1a; }
     #peerStatus.err { color: #c00; }
 
+    /* Name modal */
+    #nameModal {
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.45);
+      display: flex; align-items: center; justify-content: center;
+      z-index: 100;
+    }
+    #nameBox {
+      background: #fff;
+      border: 1px solid #ccc;
+      padding: 24px 28px;
+      min-width: 260px;
+    }
+    #nameBox label { display: block; margin-bottom: 10px; font-weight: bold; }
+    #nameInput { width: 160px; }
+
     /* Log */
     #log { border: 1px solid #ccc; padding: 10px; height: 160px; overflow-y: auto; margin-top: 16px; white-space: pre-wrap; font-size: 0.85rem; line-height: 1.5; }
     .ok  { color: #1a7a1a; }
@@ -49,7 +65,18 @@
   </style>
 </head>
 <body>
+  <div id="nameModal">
+    <div id="nameBox">
+      <label for="nameInput">Your display name</label>
+      <div class="row">
+        <input type="text" id="nameInput" maxlength="20" placeholder="e.g. Alex" autocomplete="off" />
+        <button id="nameSubmit">OK</button>
+      </div>
+    </div>
+  </div>
+
   <h1>Agent Paranoia — Step 3 Test</h1>
+  <div id="nameDisplay" style="font-size:0.85rem; margin-bottom:12px; color:#555;"></div>
 
   <div class="row">
     <button id="createBtn">Create Room</button>
@@ -101,6 +128,51 @@
     import { Chat }      from '/src/chat.js'
     import { Transfer }  from '/src/transfer.js'
 
+    // --- Display name ---
+
+    let localDisplayName = localStorage.getItem('displayName') || ''
+    let peerDisplayName = null
+
+    const nameModal = document.getElementById('nameModal')
+    const nameInput = document.getElementById('nameInput')
+
+    const nameDisplayEl = document.getElementById('nameDisplay')
+
+    function renderNameDisplay() {
+      nameDisplayEl.textContent = `You are: ${localDisplayName} · `
+      const changeLink = document.createElement('a')
+      changeLink.href = '#'
+      changeLink.textContent = 'change'
+      changeLink.addEventListener('click', e => {
+        e.preventDefault()
+        nameInput.value = localDisplayName
+        nameModal.style.display = 'flex'
+        nameInput.select()
+      })
+      nameDisplayEl.appendChild(changeLink)
+    }
+
+    function applyName(name) {
+      localDisplayName = name.trim() || 'Anonymous'
+      localStorage.setItem('displayName', localDisplayName)
+      nameModal.style.display = 'none'
+      renderNameDisplay()
+    }
+
+    if (localDisplayName) {
+      nameModal.style.display = 'none'
+      renderNameDisplay()
+    } else {
+      nameInput.focus()
+    }
+
+    document.getElementById('nameSubmit').addEventListener('click', () => {
+      applyName(nameInput.value)
+    })
+    nameInput.addEventListener('keydown', e => {
+      if (e.key === 'Enter') applyName(nameInput.value)
+    })
+
     // --- Logging ---
 
     const logEl = document.getElementById('log')
@@ -120,8 +192,17 @@
       const div = document.createElement('div')
       div.className = `msg ${msg.from}`
       const t = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      const who = msg.from === 'me' ? 'You' : 'Them'
-      div.innerHTML = `<span class="who">${who}</span> <span class="ts">${t}</span>: ${msg.text}`
+      const who = msg.from === 'me' ? (localDisplayName || 'You') : (msg.displayName || peerDisplayName || 'Them')
+
+      const whoSpan = document.createElement('span')
+      whoSpan.className = 'who'
+      whoSpan.textContent = who
+
+      const tsSpan = document.createElement('span')
+      tsSpan.className = 'ts'
+      tsSpan.textContent = t
+
+      div.append(whoSpan, ' ', tsSpan, ': ', msg.text)
       messagesEl.appendChild(div)
       messagesEl.scrollTop = messagesEl.scrollHeight
     }
@@ -130,7 +211,7 @@
       const input = document.getElementById('chatInput')
       const text = input.value.trim()
       if (!text) return
-      const msg = Chat.addMessage('me', text)
+      const msg = Chat.addMessage('me', text, { displayName: localDisplayName || null })
       WebRTC.sendChat(msg)
       renderMessage(msg)
       input.value = ''
@@ -333,7 +414,7 @@
 
       if (state === 'connected') {
         document.getElementById('session').style.display = 'block'
-        statusEl.textContent = '● Connected'
+        statusEl.textContent = `● Connected${peerDisplayName ? ` to ${peerDisplayName}` : ''}`
         statusEl.className = 'ok'
         chatInputEl.disabled = false
         sendBtnEl.disabled = false
@@ -361,7 +442,7 @@
 
     Signaling.connect(window.location.origin)
 
-    document.getElementById('createBtn').addEventListener('click', () => Signaling.createRoom())
+    document.getElementById('createBtn').addEventListener('click', () => Signaling.createRoom(localDisplayName || null))
 
     Signaling.on('room-created', ({ roomId: id }) => {
       roomId = id
@@ -370,20 +451,22 @@
     })
 
     Signaling.on('peer-joined', async ({ displayName }) => {
-      log(`Peer joined${displayName ? ` (${displayName})` : ''} — sending offer`)
+      peerDisplayName = displayName || null
+      log(`Incoming connection from ${displayName || 'unknown'} — sending offer`, 'ok')
       WebRTC.init(Signaling, roomId, onChatMessage, onFileChunk, onConnectionChange)
       await WebRTC.createOffer()
     })
 
     document.getElementById('joinBtn').addEventListener('click', () => {
       const id = document.getElementById('roomInput').value.trim().toUpperCase()
-      if (id) Signaling.joinRoom(id)
+      if (id) Signaling.joinRoom(id, localDisplayName || null)
     })
 
-    Signaling.on('room-joined', ({ roomId: id }) => {
+    Signaling.on('room-joined', ({ roomId: id, creatorDisplayName }) => {
       roomId = id
+      peerDisplayName = creatorDisplayName || null
       document.getElementById('roomDisplay').textContent = `Room: ${id}`
-      log(`Joined room: ${id} — waiting for offer`, 'ok')
+      log(`Joined room: ${id}${creatorDisplayName ? ` — host: ${creatorDisplayName}` : ''} — waiting for offer`, 'ok')
       WebRTC.init(Signaling, roomId, onChatMessage, onFileChunk, onConnectionChange)
     })
 

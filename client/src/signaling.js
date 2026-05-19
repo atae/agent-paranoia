@@ -7,8 +7,8 @@ export const Signaling = {
     socket = io(serverUrl)
   },
 
-  createRoom() {
-    socket.emit('create-room')
+  createRoom(displayName = null) {
+    socket.emit('create-room', { displayName })
   },
 
   joinRoom(roomId, displayName = null) {

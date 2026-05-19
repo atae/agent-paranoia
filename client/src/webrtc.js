@@ -124,11 +124,13 @@ export const WebRTC = {
   // Returns a Promise so Transfer.sendFile can await each chunk and respect backpressure.
   // If the channel closes while waiting for buffer to drain, the promise resolves
   // immediately (via unblockPendingChunk) so the send loop exits rather than hanging.
+  // MAX_BUFFER is 8 MB — well below Chrome's hard 16 MB limit — so a 64 KB chunk
+  // can never tip the buffer over the browser's threshold between our check and send().
   sendFileChunk(chunk) {
     return new Promise(resolve => {
       if (!_fileChannel || _fileChannel.readyState !== 'open') { resolve(); return }
 
-      const MAX_BUFFER = 16 * 1024 * 1024
+      const MAX_BUFFER = 8 * 1024 * 1024
       if (_fileChannel.bufferedAmount > MAX_BUFFER) {
         _fileChannel.bufferedAmountLowThreshold = MAX_BUFFER / 2
         _pendingChunkResolve = resolve
@@ -136,11 +138,19 @@ export const WebRTC = {
           _fileChannel.onbufferedamountlow = null
           const r = _pendingChunkResolve
           _pendingChunkResolve = null
-          if (_fileChannel.readyState === 'open') _fileChannel.send(chunk)
+          try {
+            if (_fileChannel.readyState === 'open') _fileChannel.send(chunk)
+          } catch (e) {
+            console.error('[file] send error after drain:', e)
+          }
           r?.()
         }
       } else {
-        _fileChannel.send(chunk)
+        try {
+          _fileChannel.send(chunk)
+        } catch (e) {
+          console.error('[file] send error:', e)
+        }
         resolve()
       }
     })

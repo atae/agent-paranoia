@@ -1,0 +1,415 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Agent Paranoia — Step 3 Test</title>
+  <style>
+    body { font-family: monospace; padding: 20px; max-width: 600px; }
+    h1 { font-size: 1.1rem; margin-bottom: 1.5rem; }
+    .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+    button { padding: 6px 14px; cursor: pointer; }
+    input[type=text] { padding: 6px 10px; font-family: monospace; }
+    #roomInput { width: 100px; }
+    #roomDisplay { margin: 12px 0; font-size: 1.2rem; font-weight: bold; letter-spacing: 0.1em; min-height: 1.4rem; }
+
+    /* Chat */
+    #session { display: none; margin-top: 16px; }
+    #messages { border: 1px solid #ccc; padding: 10px; height: 160px; overflow-y: auto; margin-bottom: 8px; }
+    .msg { margin-bottom: 4px; }
+    .msg .ts { color: #888; font-size: 0.8em; }
+    .msg.me .who { color: #1a7a1a; }
+    .msg.them .who { color: #00b; }
+    #chatInput { flex: 1; }
+
+    /* File transfer */
+    #dropzone {
+      border: 2px dashed #aaa;
+      padding: 20px;
+      text-align: center;
+      margin: 12px 0;
+      cursor: pointer;
+      user-select: none;
+    }
+    #dropzone.over { border-color: #1a7a1a; background: #f0fff0; }
+    .progress-item { margin: 6px 0; font-size: 0.85rem; }
+    .progress-item progress { width: 100%; height: 10px; }
+    #receiveArea { margin-top: 8px; }
+    .recv-item { margin: 6px 0; font-size: 0.85rem; }
+
+    /* Peer status */
+    #peerStatus { font-size: 0.85rem; margin-bottom: 10px; }
+    #peerStatus.ok  { color: #1a7a1a; }
+    #peerStatus.err { color: #c00; }
+
+    /* Log */
+    #log { border: 1px solid #ccc; padding: 10px; height: 160px; overflow-y: auto; margin-top: 16px; white-space: pre-wrap; font-size: 0.85rem; line-height: 1.5; }
+    .ok  { color: #1a7a1a; }
+    .err { color: #c00; }
+    .inf { color: #555; }
+  </style>
+</head>
+<body>
+  <h1>Agent Paranoia — Step 3 Test</h1>
+
+  <div class="row">
+    <button id="createBtn">Create Room</button>
+  </div>
+  <div class="row">
+    <input type="text" id="roomInput" placeholder="Room ID" maxlength="6" />
+    <button id="joinBtn">Join Room</button>
+  </div>
+  <div id="roomDisplay"></div>
+
+  <section id="session">
+    <div id="peerStatus" class="ok">● Connected</div>
+
+    <div id="disconnectPrompt" style="display:none; margin-bottom:10px; padding:8px; border:1px solid #c00; color:#c00; font-size:0.85rem;">
+      Your peer disconnected. Save chat before closing?
+      <button id="saveHtmlBtn" style="margin-left:8px;">Save as HTML</button>
+      <button id="dismissPromptBtn" style="margin-left:4px;">Dismiss</button>
+    </div>
+
+    <!-- Chat -->
+    <div class="row" style="justify-content:space-between; margin-bottom:4px;">
+      <strong>Chat</strong>
+      <span style="font-size:0.8rem;">Export:
+        <button id="exportTxtBtn">txt</button>
+        <button id="exportJsonBtn">json</button>
+        <button id="exportHtmlBtn">html</button>
+      </span>
+    </div>
+    <div id="messages"></div>
+    <div class="row">
+      <input type="text" id="chatInput" placeholder="Type a message…" />
+      <button id="sendBtn">Send</button>
+    </div>
+
+    <!-- File transfer -->
+    <div id="dropzone">
+      Drop a file here or <label for="fileInput" style="text-decoration:underline;cursor:pointer">browse</label>
+      <input type="file" id="fileInput" style="display:none" />
+    </div>
+    <div id="sendProgress"></div>
+    <div id="receiveArea"></div>
+  </section>
+
+  <div id="log"></div>
+
+  <script type="module">
+    import { Signaling } from '/src/signaling.js'
+    import { WebRTC }    from '/src/webrtc.js'
+    import { Chat }      from '/src/chat.js'
+    import { Transfer }  from '/src/transfer.js'
+
+    // --- Logging ---
+
+    const logEl = document.getElementById('log')
+    function log(msg, type = 'inf') {
+      const el = document.createElement('div')
+      el.className = type
+      el.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`
+      logEl.appendChild(el)
+      logEl.scrollTop = logEl.scrollHeight
+    }
+
+    // --- Chat UI ---
+
+    const messagesEl = document.getElementById('messages')
+
+    function renderMessage(msg) {
+      const div = document.createElement('div')
+      div.className = `msg ${msg.from}`
+      const t = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      const who = msg.from === 'me' ? 'You' : 'Them'
+      div.innerHTML = `<span class="who">${who}</span> <span class="ts">${t}</span>: ${msg.text}`
+      messagesEl.appendChild(div)
+      messagesEl.scrollTop = messagesEl.scrollHeight
+    }
+
+    function sendMessage() {
+      const input = document.getElementById('chatInput')
+      const text = input.value.trim()
+      if (!text) return
+      const msg = Chat.addMessage('me', text)
+      WebRTC.sendChat(msg)
+      renderMessage(msg)
+      input.value = ''
+    }
+
+    document.getElementById('sendBtn').addEventListener('click', sendMessage)
+    document.getElementById('chatInput').addEventListener('keydown', e => {
+      if (e.key === 'Enter') sendMessage()
+    })
+
+    // --- Chat export ---
+
+    function download(content, filename, mime) {
+      const url = URL.createObjectURL(new Blob([content], { type: mime }))
+      const a = Object.assign(document.createElement('a'), { href: url, download: filename })
+      a.click()
+      setTimeout(() => URL.revokeObjectURL(url), 5000)
+    }
+
+    function exportDate() {
+      return new Date().toISOString().slice(0, 10)
+    }
+
+    document.getElementById('exportTxtBtn').addEventListener('click', () => {
+      const txt = Chat.exportTxt()
+      if (!txt) return
+      download(txt, `chat-${exportDate()}.txt`, 'text/plain')
+    })
+    document.getElementById('exportJsonBtn').addEventListener('click', () => {
+      const json = Chat.exportJson()
+      if (Chat.getMessages().length === 0) return
+      download(json, `chat-${exportDate()}.json`, 'application/json')
+    })
+    document.getElementById('exportHtmlBtn').addEventListener('click', () => {
+      if (Chat.getMessages().length === 0) return
+      download(Chat.exportHtml(), `chat-${exportDate()}.html`, 'text/html')
+    })
+
+    // --- Disconnect prompt ---
+
+    const disconnectPrompt = document.getElementById('disconnectPrompt')
+    document.getElementById('saveHtmlBtn').addEventListener('click', () => {
+      download(Chat.exportHtml(), `chat-${exportDate()}.html`, 'text/html')
+      disconnectPrompt.style.display = 'none'
+    })
+    document.getElementById('dismissPromptBtn').addEventListener('click', () => {
+      disconnectPrompt.style.display = 'none'
+    })
+
+    // --- File transfer UI ---
+
+    const sendProgressEl = document.getElementById('sendProgress')
+    const receiveAreaEl  = document.getElementById('receiveArea')
+    let sendProgressItem = null
+    let recvProgressItem = null
+
+    function onSendProgress({ fileName, percent, bytesTransferred, totalBytes, speed }) {
+      if (!sendProgressItem) {
+        sendProgressItem = document.createElement('div')
+        sendProgressItem.className = 'progress-item'
+        sendProgressItem.innerHTML = `<div></div><progress max="100" value="0"></progress>`
+        sendProgressEl.appendChild(sendProgressItem)
+      }
+      sendProgressItem.querySelector('progress').value = percent
+      if (percent === 100) {
+        sendProgressItem.querySelector('div').textContent = `Sent: ${fileName} (avg ${fmtSpeed(speed)})`
+        sendProgressItem = null
+        if (!recvProgressItem) document.title = PAGE_TITLE
+      } else {
+        sendProgressItem.querySelector('div').textContent =
+          `Sending: ${fileName} — ${percent}% (${fmt(bytesTransferred)} / ${fmt(totalBytes)}) @ ${fmtSpeed(speed)}`
+        if (!recvProgressItem) document.title = `↑ ${percent}% — ${PAGE_TITLE}`
+      }
+    }
+
+    function onRecvProgress({ fileName, percent, bytesTransferred, totalBytes, speed }) {
+      if (!recvProgressItem) {
+        transferInProgress = true
+        recvProgressItem = document.createElement('div')
+        recvProgressItem.className = 'recv-item'
+        recvProgressItem.innerHTML = `<div></div><progress max="100" value="0"></progress>`
+        receiveAreaEl.appendChild(recvProgressItem)
+      }
+      recvProgressItem.querySelector('progress').value = percent
+      recvProgressItem.querySelector('div').textContent =
+        `Receiving: ${fileName} — ${percent}% (${fmt(bytesTransferred)} / ${fmt(totalBytes)}) @ ${fmtSpeed(speed)}`
+      document.title = `↓ ${percent}% — ${PAGE_TITLE}`
+    }
+
+    function onRecvComplete({ fileName, blob, speed }) {
+      transferInProgress = false
+      document.title = PAGE_TITLE
+      log(`Received: ${fileName} (${fmt(blob.size)})`, 'ok')
+      if (recvProgressItem) {
+        recvProgressItem.querySelector('progress').value = 100
+        const url = URL.createObjectURL(blob)
+        const label = document.createElement('span')
+        label.textContent = `Received: ${fileName}`
+        const a = document.createElement('a')
+        a.href = url
+        a.download = fileName
+        a.textContent = ' [Save]'
+        a.style.marginLeft = '8px'
+        a.addEventListener('click', () => setTimeout(() => URL.revokeObjectURL(url), 10_000))
+        label.appendChild(a)
+        recvProgressItem.querySelector('div').replaceChildren(label)
+        recvProgressItem = null
+      }
+    }
+
+    function fmt(bytes) {
+      if (bytes < 1024) return `${bytes} B`
+      if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KB`
+      if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MB`
+      return `${(bytes / 1024 ** 3).toFixed(2)} GB`
+    }
+
+    function fmtSpeed(bps) {
+      if (bps < 1024) return `${bps.toFixed(0)} B/s`
+      if (bps < 1024 ** 2) return `${(bps / 1024).toFixed(1)} KB/s`
+      return `${(bps / 1024 ** 2).toFixed(1)} MB/s`
+    }
+
+    const PAGE_TITLE = document.title
+    let transferInProgress = false
+    const fileQueue = []
+    let activeSend = false
+
+    window.addEventListener('beforeunload', e => {
+      if (transferInProgress) {
+        e.preventDefault()
+        e.returnValue = ''
+      }
+    })
+
+    async function processQueue() {
+      if (activeSend || fileQueue.length === 0) return
+      activeSend = true
+      const file = fileQueue.shift()
+
+      log(`Sending: ${file.name} (${fmt(file.size)})${fileQueue.length ? ` — ${fileQueue.length} more queued` : ''}`)
+      sendProgressItem = null
+
+      try {
+        await Transfer.sendFile(file, chunk => WebRTC.sendFileChunk(chunk), onSendProgress)
+        log(`Send complete: ${file.name}`, 'ok')
+      } catch (err) {
+        sendProgressItem = null
+        log(`Send error: ${file.name} — ${err.message}`, 'err')
+      } finally {
+        activeSend = false
+        transferInProgress = fileQueue.length > 0
+        processQueue()
+      }
+    }
+
+    function sendFile(file) {
+      fileQueue.push(file)
+      transferInProgress = true
+      if (fileQueue.length > 1) log(`Queued: ${file.name}`)
+      processQueue()
+    }
+
+    const dropzone = document.getElementById('dropzone')
+    dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('over') })
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('over'))
+    dropzone.addEventListener('drop', e => {
+      e.preventDefault()
+      dropzone.classList.remove('over')
+      const file = e.dataTransfer.files[0]
+      if (file) sendFile(file)
+    })
+    dropzone.addEventListener('click', () => document.getElementById('fileInput').click())
+    document.getElementById('fileInput').addEventListener('change', e => {
+      const file = e.target.files[0]
+      if (file) sendFile(file)
+      e.target.value = ''
+    })
+
+    // --- WebRTC callbacks ---
+
+    function onChatMessage(msg) {
+      const stored = Chat.addMessage('them', msg.text, {
+        displayName: msg.displayName,
+        timestamp: msg.timestamp
+      })
+      renderMessage(stored)
+    }
+
+    function onFileChunk(data) {
+      Transfer.handleIncoming(data, onRecvProgress, onRecvComplete)
+    }
+
+    const statusEl   = document.getElementById('peerStatus')
+    const chatInputEl = document.getElementById('chatInput')
+    const sendBtnEl   = document.getElementById('sendBtn')
+
+    function onConnectionChange(state) {
+      log(`Connection: ${state}`, state === 'connected' ? 'ok' : 'err')
+
+      if (state === 'connected') {
+        document.getElementById('session').style.display = 'block'
+        statusEl.textContent = '● Connected'
+        statusEl.className = 'ok'
+        chatInputEl.disabled = false
+        sendBtnEl.disabled = false
+        dropzone.style.opacity = ''
+        dropzone.style.pointerEvents = ''
+      } else {
+        // Keep session visible — received files must stay accessible for saving.
+        // Just disable sending and show the disconnected state.
+        statusEl.textContent = `● Peer disconnected`
+        statusEl.className = 'err'
+        chatInputEl.disabled = true
+        sendBtnEl.disabled = true
+        dropzone.style.opacity = '0.4'
+        dropzone.style.pointerEvents = 'none'
+        // Drain the queue — any active send will unblock via the channel onclose handler
+        fileQueue.length = 0
+        transferInProgress = false
+        sendProgressItem = null
+      }
+    }
+
+    // --- Signaling ---
+
+    let roomId = null
+
+    Signaling.connect(window.location.origin)
+
+    document.getElementById('createBtn').addEventListener('click', () => Signaling.createRoom())
+
+    Signaling.on('room-created', ({ roomId: id }) => {
+      roomId = id
+      document.getElementById('roomDisplay').textContent = `Room: ${id}`
+      log(`Room created: ${id} — share with the joiner tab`, 'ok')
+    })
+
+    Signaling.on('peer-joined', async ({ displayName }) => {
+      log(`Peer joined${displayName ? ` (${displayName})` : ''} — sending offer`)
+      WebRTC.init(Signaling, roomId, onChatMessage, onFileChunk, onConnectionChange)
+      await WebRTC.createOffer()
+    })
+
+    document.getElementById('joinBtn').addEventListener('click', () => {
+      const id = document.getElementById('roomInput').value.trim().toUpperCase()
+      if (id) Signaling.joinRoom(id)
+    })
+
+    Signaling.on('room-joined', ({ roomId: id }) => {
+      roomId = id
+      document.getElementById('roomDisplay').textContent = `Room: ${id}`
+      log(`Joined room: ${id} — waiting for offer`, 'ok')
+      WebRTC.init(Signaling, roomId, onChatMessage, onFileChunk, onConnectionChange)
+    })
+
+    Signaling.on('room-error', ({ message }) => log(`Error: ${message}`, 'err'))
+
+    Signaling.on('offer', async ({ offer }) => {
+      log('Offer received — sending answer')
+      await WebRTC.handleOffer(offer)
+      log('Answer sent')
+    })
+
+    Signaling.on('answer', async ({ answer }) => {
+      log('Answer received')
+      await WebRTC.handleAnswer(answer)
+    })
+
+    Signaling.on('ice-candidate', async ({ candidate }) => {
+      await WebRTC.handleIceCandidate(candidate)
+    })
+
+    Signaling.on('peer-left', () => {
+      log('Peer disconnected', 'err')
+      if (Chat.getMessages().length > 0) {
+        disconnectPrompt.style.display = 'block'
+      }
+    })
+  </script>
+</body>
+</html>

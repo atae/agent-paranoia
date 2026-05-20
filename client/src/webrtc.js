@@ -16,6 +16,33 @@ let _onConnectionChange = null
 // onclose/onerror unblocks it so Transfer.sendFile doesn't hang forever.
 let _pendingChunkResolve = null
 
+// Null out all event handlers and close the current PC without firing any
+// callbacks into the application. Called before creating a new connection and
+// when the caller explicitly closes one.
+function _teardown() {
+  if (_chatChannel) {
+    _chatChannel.onopen = null
+    _chatChannel.onclose = null
+    _chatChannel.onerror = null
+    _chatChannel.onmessage = null
+  }
+  if (_fileChannel) {
+    _fileChannel.onopen = null
+    _fileChannel.onclose = null
+    _fileChannel.onerror = null
+    _fileChannel.onmessage = null
+  }
+  if (_pc) {
+    _pc.onicecandidate = null
+    _pc.oniceconnectionstatechange = null
+    _pc.close()
+  }
+  _pc = null
+  _chatChannel = null
+  _fileChannel = null
+  unblockPendingChunk()
+}
+
 function attachChat(channel) {
   _chatChannel = channel
   channel.onopen = () => {
@@ -60,6 +87,10 @@ function unblockPendingChunk() {
 
 export const WebRTC = {
   init(signaling, roomId, onChatMessage, onFileChunk, onConnectionChange) {
+    // Tear down any previous connection first so orphaned channels can't fire
+    // stale onclose events into the new session.
+    _teardown()
+
     _signaling = signaling
     _roomId = roomId
     _onChatMessage = onChatMessage
@@ -75,7 +106,8 @@ export const WebRTC = {
     _pc.oniceconnectionstatechange = () => {
       const s = _pc.iceConnectionState
       console.log('[ice] state:', s)
-      if (s === 'failed' || s === 'disconnected' || s === 'closed') {
+      // 'disconnected' is transient and self-recovers; 'failed'/'closed' are terminal.
+      if (s === 'failed' || s === 'closed') {
         _onConnectionChange(s)
       }
     }
@@ -157,11 +189,6 @@ export const WebRTC = {
   },
 
   close() {
-    _chatChannel?.close()
-    _fileChannel?.close()
-    _pc?.close()
-    _pc = null
-    _chatChannel = null
-    _fileChannel = null
+    _teardown()
   }
 }

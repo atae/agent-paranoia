@@ -1,0 +1,328 @@
+const PAGE_TITLE = document.title
+
+// ── DOM refs ──────────────────────────────────────────────────────────────
+const nameModal      = document.getElementById('nameModal')
+const nameInput      = document.getElementById('nameInput')
+const nameDisplayEl  = document.getElementById('nameDisplay')
+
+const views = {
+  home:    document.getElementById('viewHome'),
+  lobby:   document.getElementById('viewLobby'),
+  session: document.getElementById('viewSession'),
+}
+
+const roomCodeEl         = document.getElementById('roomCode')
+const copyBtn            = document.getElementById('copyBtn')
+const peerStatusEl       = document.getElementById('peerStatus')
+const messagesEl         = document.getElementById('messages')
+const chatInputEl        = document.getElementById('chatInput')
+const sendBtnEl          = document.getElementById('sendBtn')
+const dropzone           = document.getElementById('dropzone')
+const sendQueueEl        = document.getElementById('sendQueue')
+const receiveAreaEl      = document.getElementById('receiveArea')
+
+const PROGRESS_INTERVAL_MS = 250
+
+// ── State ─────────────────────────────────────────────────────────────────
+let _cbs = {}
+let _localName = localStorage.getItem('displayName') || ''
+let _roomId = null
+let _lastSendUpdate = 0
+let _lastRecvUpdate = 0
+
+// Send items: array of { fileName, state, el, labelEl, progressEl }
+// state: 'queued' | 'active' | 'done' | 'error'
+const _sendItems = []
+let _recvItem = null   // current receive progress element
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+function setView(name) {
+  for (const [k, el] of Object.entries(views)) el.hidden = k !== name
+}
+
+function renderNameDisplay() {
+  nameDisplayEl.textContent = `You are: ${_localName} · `
+  const a = document.createElement('a')
+  a.textContent = 'change'
+  a.href = '#'
+  a.addEventListener('click', e => {
+    e.preventDefault()
+    nameInput.value = _localName
+    nameModal.style.display = 'flex'
+    nameInput.select()
+  })
+  nameDisplayEl.appendChild(a)
+}
+
+function applyName(raw) {
+  _localName = raw.trim() || 'Anonymous'
+  localStorage.setItem('displayName', _localName)
+  nameModal.style.display = 'none'
+  renderNameDisplay()
+  _cbs.onNameChanged?.(_localName)
+}
+
+function fmt(bytes) {
+  if (bytes < 1024)       return `${bytes} B`
+  if (bytes < 1024 ** 2)  return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 ** 3)  return `${(bytes / 1024 ** 2).toFixed(1)} MB`
+  return `${(bytes / 1024 ** 3).toFixed(2)} GB`
+}
+
+function fmtSpeed(bps) {
+  if (!bps || bps < 1)    return ''
+  if (bps < 1024)         return `${bps.toFixed(0)} B/s`
+  if (bps < 1024 ** 2)    return `${(bps / 1024).toFixed(1)} KB/s`
+  return `${(bps / 1024 ** 2).toFixed(1)} MB/s`
+}
+
+function makeSendItem(fileName, state) {
+  const el = document.createElement('div')
+  el.className = `transfer-item ${state}`
+  const labelEl = document.createElement('div')
+  labelEl.className = 't-label'
+  const progressEl = document.createElement('progress')
+  progressEl.max = 100
+  progressEl.value = 0
+  el.append(labelEl, progressEl)
+  sendQueueEl.appendChild(el)
+  const item = { fileName, state, el, labelEl, progressEl }
+  _sendItems.push(item)
+  return item
+}
+
+function findActiveSend(fileName) {
+  return _sendItems.find(i => i.fileName === fileName && (i.state === 'queued' || i.state === 'active'))
+}
+
+// ── Public API ────────────────────────────────────────────────────────────
+export const UI = {
+  init(callbacks) {
+    _cbs = callbacks
+
+    // Name modal
+    if (_localName) {
+      nameModal.style.display = 'none'
+      renderNameDisplay()
+    } else {
+      nameInput.focus()
+    }
+    document.getElementById('nameSubmit').addEventListener('click', () => applyName(nameInput.value))
+    nameInput.addEventListener('keydown', e => { if (e.key === 'Enter') applyName(nameInput.value) })
+
+    // Home buttons
+    document.getElementById('createBtn').addEventListener('click', () => _cbs.onCreateRoom?.())
+    const joinAction = () => {
+      const raw = document.getElementById('roomInput').value.replace(/-/g, '').trim()
+      if (raw) _cbs.onJoinRoom?.(raw)
+    }
+    document.getElementById('joinBtn').addEventListener('click', joinAction)
+    const roomInput = document.getElementById('roomInput')
+    roomInput.addEventListener('keydown', e => { if (e.key === 'Enter') joinAction() })
+    roomInput.addEventListener('input', e => {
+      const digits = e.target.value.replace(/-/g, '').toUpperCase().slice(0, 6)
+      e.target.value = digits.length > 3 ? `${digits.slice(0, 3)}-${digits.slice(3)}` : digits
+    })
+
+    // Lobby back
+    document.getElementById('cancelLobbyBtn').addEventListener('click', () => _cbs.onCancelLobby?.())
+
+    // Lobby copy
+    copyBtn.addEventListener('click', () => {
+      if (!_roomId) return
+      navigator.clipboard.writeText(_roomId).then(() => {
+        copyBtn.textContent = 'Copied!'
+        setTimeout(() => { copyBtn.textContent = 'Copy' }, 2000)
+      })
+    })
+
+    // Chat
+    const sendMessage = () => {
+      const text = chatInputEl.value.trim()
+      if (!text) return
+      _cbs.onSendMessage?.(text)
+      chatInputEl.value = ''
+    }
+    sendBtnEl.addEventListener('click', sendMessage)
+    chatInputEl.addEventListener('keydown', e => { if (e.key === 'Enter') sendMessage() })
+
+    // Export
+    document.getElementById('exportTxtBtn').addEventListener('click',  () => _cbs.onExport?.('txt'))
+    document.getElementById('exportJsonBtn').addEventListener('click', () => _cbs.onExport?.('json'))
+    document.getElementById('exportHtmlBtn').addEventListener('click', () => _cbs.onExport?.('html'))
+
+    // File drop / browse
+    dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('over') })
+    dropzone.addEventListener('dragleave', () => dropzone.classList.remove('over'))
+    dropzone.addEventListener('drop', e => {
+      e.preventDefault()
+      dropzone.classList.remove('over')
+      const file = e.dataTransfer.files[0]
+      if (file) _cbs.onSendFile?.(file)
+    })
+    dropzone.addEventListener('click', () => document.getElementById('fileInput').click())
+    document.getElementById('fileInput').addEventListener('change', e => {
+      const file = e.target.files[0]
+      if (file) _cbs.onSendFile?.(file)
+      e.target.value = ''
+    })
+  },
+
+  getLocalName() { return _localName },
+
+  // Wipe all session state so stale messages/status/queue from a previous
+  // connection don't bleed into the new one.
+  resetSession() {
+    _lastSendUpdate = 0
+    _lastRecvUpdate = 0
+    peerStatusEl.textContent = '● Waiting for peer'
+    peerStatusEl.className = 'status-dot waiting'
+    chatInputEl.disabled = true
+    sendBtnEl.disabled = true
+    dropzone.classList.remove('disabled')
+    messagesEl.textContent = ''
+    sendQueueEl.textContent = ''
+    receiveAreaEl.textContent = ''
+    _sendItems.length = 0
+    _recvItem = null
+    document.title = PAGE_TITLE
+  },
+
+  showHome()          { setView('home') },
+  showLobby(roomId)   {
+    _roomId = roomId
+    roomCodeEl.textContent = roomId.slice(0, 3) + '-' + roomId.slice(3)
+    copyBtn.textContent = 'Copy'
+    setView('lobby')
+  },
+  showSession()       { setView('session') },
+
+  setPeerStatus(state, peerName) {
+    const label = {
+      waiting:      '● Waiting for peer',
+      connected:    `● Connected${peerName ? ` to ${peerName}` : ''}`,
+      disconnected: '● Peer disconnected',
+    }[state] ?? state
+    peerStatusEl.textContent = label
+    peerStatusEl.className = `status-dot ${state}`
+
+    const on = state === 'connected'
+    chatInputEl.disabled = !on
+    sendBtnEl.disabled   = !on
+    dropzone.classList.toggle('disabled', !on)
+
+    if (state === 'disconnected') {
+      for (const item of _sendItems) {
+        if (item.state === 'active') item.labelEl.textContent = `Stalled: ${item.fileName}`
+      }
+      if (_recvItem) _recvItem.labelEl.textContent = `Stalled: ${_recvItem.fileName ?? 'incoming file'}`
+    }
+  },
+
+  addMessage(msg) {
+    const div = document.createElement('div')
+    div.className = `msg ${msg.from}`
+    const t = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    const who = msg.from === 'me' ? (_localName || 'You') : (msg.displayName || 'Them')
+
+    const whoSpan = document.createElement('span')
+    whoSpan.className = 'who'
+    whoSpan.textContent = who
+
+    const tsSpan = document.createElement('span')
+    tsSpan.className = 'ts'
+    tsSpan.textContent = t
+
+    div.append(whoSpan, ' ', tsSpan, ': ', msg.text)
+    messagesEl.appendChild(div)
+    messagesEl.scrollTop = messagesEl.scrollHeight
+  },
+
+  // Called when a file is added to the queue but sending hasn't started yet
+  fileQueued(fileName) {
+    const item = makeSendItem(fileName, 'queued')
+    item.labelEl.textContent = `Queued: ${fileName}`
+  },
+
+  // Called just before Transfer.sendFile begins for this file
+  fileStarted(fileName) {
+    let item = findActiveSend(fileName)
+    if (!item) item = makeSendItem(fileName, 'active')
+    item.state = 'active'
+    item.el.className = 'transfer-item'
+    item.progressEl.value = 0
+    item.labelEl.textContent = `Sending: ${fileName}…`
+  },
+
+  updateSendProgress({ fileName, percent, bytesTransferred, totalBytes, speed }) {
+    const item = findActiveSend(fileName)
+    if (!item) return
+    const now = Date.now()
+    if (percent < 100 && now - _lastSendUpdate < PROGRESS_INTERVAL_MS) return
+    _lastSendUpdate = now
+    item.progressEl.value = percent
+    if (percent === 100) {
+      item.state = 'done'
+      item.el.className = 'transfer-item done'
+      item.labelEl.textContent = `Sent: ${fileName}${speed ? ` (avg ${fmtSpeed(speed)})` : ''}`
+      if (!_recvItem) document.title = PAGE_TITLE
+    } else {
+      item.labelEl.textContent =
+        `Sending: ${fileName} — ${percent}% (${fmt(bytesTransferred)} / ${fmt(totalBytes)}) @ ${fmtSpeed(speed)}`
+      if (!_recvItem) document.title = `↑ ${percent}% — ${PAGE_TITLE}`
+    }
+  },
+
+  fileFailed(fileName, errMsg) {
+    const item = findActiveSend(fileName)
+    if (!item) return
+    item.state = 'error'
+    item.el.className = 'transfer-item error'
+    item.labelEl.textContent = `Error: ${fileName} — ${errMsg}`
+    if (!_recvItem) document.title = PAGE_TITLE
+  },
+
+  updateRecvProgress({ fileName, percent, bytesTransferred, totalBytes, speed }) {
+    const now = Date.now()
+    const throttled = percent < 100 && now - _lastRecvUpdate < PROGRESS_INTERVAL_MS
+    if (!_recvItem) {
+      const el = document.createElement('div')
+      el.className = 'transfer-item'
+      const labelEl = document.createElement('div')
+      labelEl.className = 't-label'
+      const progressEl = document.createElement('progress')
+      progressEl.max = 100
+      progressEl.value = 0
+      el.append(labelEl, progressEl)
+      receiveAreaEl.appendChild(el)
+      _recvItem = { fileName, el, labelEl, progressEl }
+    }
+    if (throttled) return
+    _lastRecvUpdate = now
+    _recvItem.progressEl.value = percent
+    _recvItem.labelEl.textContent =
+      `Receiving: ${fileName} — ${percent}% (${fmt(bytesTransferred)} / ${fmt(totalBytes)}) @ ${fmtSpeed(speed)}`
+    document.title = `↓ ${percent}% — ${PAGE_TITLE}`
+  },
+
+  recvComplete({ fileName, blob }) {
+    document.title = PAGE_TITLE
+    if (!_recvItem) return
+    _recvItem.el.className = 'transfer-item done'
+    _recvItem.progressEl.value = 100
+
+    const url = URL.createObjectURL(blob)
+    const nameSpan = document.createElement('span')
+    nameSpan.textContent = `Received: ${fileName}`
+    const saveLink = document.createElement('a')
+    saveLink.href = url
+    saveLink.download = fileName
+    saveLink.textContent = ' [Save]'
+    saveLink.style.marginLeft = '8px'
+    saveLink.addEventListener('click', () => setTimeout(() => URL.revokeObjectURL(url), 10_000))
+    nameSpan.appendChild(saveLink)
+    _recvItem.labelEl.replaceChildren(nameSpan)
+    _recvItem = null
+  },
+
+}

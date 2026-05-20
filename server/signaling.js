@@ -15,7 +15,7 @@ const MIME_TYPES = {
 }
 
 const server = http.createServer((req, res) => {
-  const urlPath = req.url === '/' ? '/test.html' : req.url.split('?')[0]
+  const urlPath = req.url === '/' ? '/index.html' : req.url.split('?')[0]
   const resolved = path.resolve(path.join(CLIENT_DIR, urlPath))
 
   // Prevent path traversal outside client dir

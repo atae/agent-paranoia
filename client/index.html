@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Paranoia</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+  <div id="nameModal" class="modal-overlay">
+    <div class="modal-box">
+      <label for="nameInput">Display name</label>
+      <div class="name-row">
+        <input type="text" id="nameInput" maxlength="20" placeholder="e.g. Alex" autocomplete="off" />
+        <button id="nameSubmit">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Home -->
+  <div id="viewHome" class="view">
+    <h1 class="logo">Agent Paranoia</h1>
+    <div id="nameDisplay" class="name-display"></div>
+    <button id="createBtn" class="btn-primary">Create Room</button>
+    <div class="or-divider">or</div>
+    <div class="join-row">
+      <input id="roomInput" type="text" class="code-input" placeholder="ABC-DEF"
+             maxlength="7" autocomplete="off" spellcheck="false" />
+      <button id="joinBtn">Join</button>
+    </div>
+  </div>
+
+  <!-- Lobby -->
+  <div id="viewLobby" class="view" hidden>
+    <h1 class="logo">Agent Paranoia</h1>
+    <p class="muted">Share this code with your peer:</p>
+    <div id="roomCode" class="room-code"></div>
+    <button id="copyBtn">Copy</button>
+    <div class="lobby-waiting">
+      <div class="spinner"></div>
+      <span class="muted">Waiting for peer…</span>
+    </div>
+    <button id="cancelLobbyBtn" class="cancel-btn">← Back</button>
+  </div>
+
+  <!-- Session -->
+  <div id="viewSession" class="view" hidden>
+    <div class="topbar">
+      <strong>Agent Paranoia</strong>
+      <span id="peerStatus" class="status-dot waiting">● Waiting for peer</span>
+    </div>
+
+    <div class="chat-panel">
+      <div class="panel-header">
+        <span>Chat</span>
+        <span class="export-group">
+          <button id="exportTxtBtn">txt</button>
+          <button id="exportJsonBtn">json</button>
+          <button id="exportHtmlBtn">html</button>
+        </span>
+      </div>
+      <div id="messages" class="messages" role="log" aria-live="polite"></div>
+      <div class="chat-foot">
+        <input id="chatInput" type="text" placeholder="Type a message…" autocomplete="off" disabled />
+        <button id="sendBtn" disabled>Send</button>
+      </div>
+    </div>
+
+    <div id="dropzone" class="dropzone">
+      Drop a file here or <label for="fileInput">browse</label>
+      <input type="file" id="fileInput" hidden />
+    </div>
+    <div id="sendQueue"></div>
+    <div id="receiveArea"></div>
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

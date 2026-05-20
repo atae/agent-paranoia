@@ -42,6 +42,10 @@ export const Chat = {
     return messages
   },
 
+  clear() {
+    messages.length = 0
+  },
+
   exportTxt() {
     return messages.map(m => {
       const who = m.from === 'me' ? 'You' : (m.displayName || 'Them')

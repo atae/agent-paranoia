@@ -1,10 +1,21 @@
 import { io } from '/socket.io/socket.io.esm.min.js'
 
 let socket = null
+let _serverUrl = null
+const _handlers = []   // replayed onto fresh socket after reset()
 
 export const Signaling = {
   connect(serverUrl) {
+    _serverUrl = serverUrl
     socket = io(serverUrl)
+  },
+
+  // Disconnect and get a fresh socket (e.g. user cancels the lobby).
+  // Replays all registered handlers so callers don't need to re-register.
+  reset() {
+    socket.disconnect()
+    socket = io(_serverUrl)
+    for (const { event, handler } of _handlers) socket.on(event, handler)
   },
 
   createRoom(displayName = null) {
@@ -28,6 +39,7 @@ export const Signaling = {
   },
 
   on(event, handler) {
+    _handlers.push({ event, handler })
     socket.on(event, handler)
-  }
+  },
 }

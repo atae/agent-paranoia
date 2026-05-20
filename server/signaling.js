@@ -41,6 +41,7 @@ const io = new Server(server)
 
 // rooms.get(roomId) = { peers: [socketId, socketId?] }
 const rooms = new Map()
+const MAX_ROOMS = 10
 
 function generateRoomId() {
   return Math.random().toString(36).slice(2, 8).toUpperCase()
@@ -50,6 +51,10 @@ io.on('connection', (socket) => {
   let currentRoomId = null
 
   socket.on('create-room', ({ displayName } = {}) => {
+    if (rooms.size >= MAX_ROOMS) {
+      socket.emit('room-error', { message: 'Server is full' })
+      return
+    }
     const roomId = generateRoomId()
     rooms.set(roomId, { peers: [socket.id], creatorDisplayName: displayName || null })
     currentRoomId = roomId

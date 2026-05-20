@@ -15,11 +15,14 @@ let _onConnectionChange = null
 // Stored resolve for a sendFileChunk call that's waiting on backpressure.
 // onclose/onerror unblocks it so Transfer.sendFile doesn't hang forever.
 let _pendingChunkResolve = null
+let _iceTimeout = null
 
 // Null out all event handlers and close the current PC without firing any
 // callbacks into the application. Called before creating a new connection and
 // when the caller explicitly closes one.
 function _teardown() {
+  clearTimeout(_iceTimeout)
+  _iceTimeout = null
   if (_chatChannel) {
     _chatChannel.onopen = null
     _chatChannel.onclose = null
@@ -103,11 +106,20 @@ export const WebRTC = {
       if (candidate) _signaling.sendIceCandidate(_roomId, candidate)
     }
 
+    _iceTimeout = setTimeout(() => {
+      if (_pc && _pc.iceConnectionState !== 'connected') {
+        _onConnectionChange('failed')
+        _teardown()
+      }
+    }, 30_000)
+
     _pc.oniceconnectionstatechange = () => {
       const s = _pc.iceConnectionState
       console.log('[ice] state:', s)
+      if (s === 'connected') { clearTimeout(_iceTimeout); _iceTimeout = null }
       // 'disconnected' is transient and self-recovers; 'failed'/'closed' are terminal.
       if (s === 'failed' || s === 'closed') {
+        _teardown()
         _onConnectionChange(s)
       }
     }

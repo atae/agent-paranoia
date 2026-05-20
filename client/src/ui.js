@@ -23,12 +23,73 @@ const receiveAreaEl      = document.getElementById('receiveArea')
 
 const PROGRESS_INTERVAL_MS = 250
 
+// ── Translations ──────────────────────────────────────────────────────────
+const TX = {
+  createRoom:      { en: 'Create Room',                   jp: '部屋を作成' },
+  or:              { en: 'or',                            jp: 'または' },
+  join:            { en: 'Join',                          jp: '参加' },
+  shareCode:       { en: 'Share this code with your peer:', jp: 'このコードを相手に共有:' },
+  copy:            { en: 'Copy',                          jp: 'コピー' },
+  copied:          { en: 'Copied!',                       jp: 'コピー完了！' },
+  waitingPeer:     { en: 'Waiting for peer…',             jp: '接続待ち中…' },
+  back:            { en: '← Back',                       jp: '← 戻る' },
+  chat:            { en: 'Chat',                          jp: 'チャット' },
+  send:            { en: 'Send',                          jp: '送信' },
+  displayName:     { en: 'Display name',                  jp: '表示名' },
+  ok:              { en: 'OK',                            jp: 'OK' },
+  msgPlaceholder:  { en: 'Type a message…',               jp: 'メッセージを入力…' },
+  namePlaceholder: { en: 'e.g. Alex',                     jp: '例: アレックス' },
+  dropText:        { en: 'Drop a file here or ',          jp: 'ここにファイルをドロップ または ' },
+  browse:          { en: 'browse',                        jp: '参照' },
+  youAre:          { en: 'You are:',                      jp: '名前:' },
+  change:          { en: 'change',                        jp: '変更' },
+  waitingStatus:   { en: '● Waiting for peer',            jp: '● 接続待ち' },
+  disconnected:    { en: '● Peer disconnected',           jp: '● 切断されました' },
+  connected:       { en: 'Connected',                     jp: '接続済み' },
+  connectedTo:     { en: 'Connected to',                  jp: 'と接続中' },
+  queued:          { en: 'Queued',                        jp: '待機中' },
+  sending:         { en: 'Sending',                       jp: '送信中' },
+  sent:            { en: 'Sent',                          jp: '送信完了' },
+  errorLabel:      { en: 'Error',                         jp: 'エラー' },
+  receiving:       { en: 'Receiving',                     jp: '受信中' },
+  received:        { en: 'Received',                      jp: '受信完了' },
+  stalled:         { en: 'Stalled',                       jp: '停止' },
+  save:            { en: '[Save]',                        jp: '[保存]' },
+}
+
+function t(key) {
+  const lang = document.body.classList.contains('jp') ? 'jp' : 'en'
+  return TX[key]?.[lang] ?? key
+}
+
+function applyTranslations() {
+  document.getElementById('createBtn').textContent              = t('createRoom')
+  document.querySelector('.or-divider').textContent             = t('or')
+  document.getElementById('joinBtn').textContent                = t('join')
+  document.querySelector('#viewLobby .muted').textContent       = t('shareCode')
+  copyBtn.textContent                                           = t('copy')
+  document.querySelector('.lobby-waiting .muted').textContent   = t('waitingPeer')
+  document.getElementById('cancelLobbyBtn').textContent         = t('back')
+  document.querySelector('.panel-header > span').textContent    = t('chat')
+  sendBtnEl.textContent                                         = t('send')
+  document.querySelector('label[for="nameInput"]').textContent  = t('displayName')
+  document.getElementById('nameSubmit').textContent             = t('ok')
+  chatInputEl.placeholder                                       = t('msgPlaceholder')
+  nameInput.placeholder                                         = t('namePlaceholder')
+  document.getElementById('dropText').textContent               = t('dropText')
+  document.getElementById('browseLabel').textContent            = t('browse')
+  peerStatusEl.textContent = peerStatusLabel(_peerState, _peerName)
+  if (_localName) renderNameDisplay()
+}
+
 // ── State ─────────────────────────────────────────────────────────────────
 let _cbs = {}
 let _localName = localStorage.getItem('displayName') || ''
 let _roomId = null
 let _lastSendUpdate = 0
 let _lastRecvUpdate = 0
+let _peerState = 'waiting'
+let _peerName  = null
 
 // Send items: array of { fileName, state, el, labelEl, progressEl }
 // state: 'queued' | 'active' | 'done' | 'error'
@@ -36,14 +97,24 @@ const _sendItems = []
 let _recvItem = null   // current receive progress element
 
 // ── Helpers ───────────────────────────────────────────────────────────────
+function peerStatusLabel(state, peerName) {
+  const jp = document.body.classList.contains('jp')
+  if (state === 'connected') {
+    return peerName
+      ? `● ${jp ? `${peerName} ${t('connectedTo')}` : `${t('connectedTo')} ${peerName}`}`
+      : `● ${t('connected')}`
+  }
+  return { waiting: t('waitingStatus'), disconnected: t('disconnected') }[state] ?? state
+}
+
 function setView(name) {
   for (const [k, el] of Object.entries(views)) el.hidden = k !== name
 }
 
 function renderNameDisplay() {
-  nameDisplayEl.textContent = `You are: ${_localName} · `
+  nameDisplayEl.textContent = `${t('youAre')} ${_localName} · `
   const a = document.createElement('a')
-  a.textContent = 'change'
+  a.textContent = t('change')
   a.href = '#'
   a.addEventListener('click', e => {
     e.preventDefault()
@@ -100,6 +171,20 @@ export const UI = {
   init(callbacks) {
     _cbs = callbacks
 
+    // Theme toggle
+    const themeToggle = document.getElementById('themeToggle')
+    if (localStorage.getItem('theme') === 'jp') {
+      document.body.classList.add('jp')
+      themeToggle.textContent = '英語'
+      applyTranslations()
+    }
+    themeToggle.addEventListener('click', () => {
+      const jp = document.body.classList.toggle('jp')
+      themeToggle.textContent = jp ? '英語' : '日本語'
+      localStorage.setItem('theme', jp ? 'jp' : 'default')
+      applyTranslations()
+    })
+
     // Name modal
     if (_localName) {
       nameModal.style.display = 'none'
@@ -131,8 +216,8 @@ export const UI = {
     copyBtn.addEventListener('click', () => {
       if (!_roomId) return
       navigator.clipboard.writeText(_roomId).then(() => {
-        copyBtn.textContent = 'Copied!'
-        setTimeout(() => { copyBtn.textContent = 'Copy' }, 2000)
+        copyBtn.textContent = t('copied')
+        setTimeout(() => { copyBtn.textContent = t('copy') }, 2000)
       })
     })
 
@@ -175,7 +260,9 @@ export const UI = {
   resetSession() {
     _lastSendUpdate = 0
     _lastRecvUpdate = 0
-    peerStatusEl.textContent = '● Waiting for peer'
+    _peerState = 'waiting'
+    _peerName  = null
+    peerStatusEl.textContent = t('waitingStatus')
     peerStatusEl.className = 'status-dot waiting'
     chatInputEl.disabled = true
     sendBtnEl.disabled = true
@@ -192,18 +279,15 @@ export const UI = {
   showLobby(roomId)   {
     _roomId = roomId
     roomCodeEl.textContent = roomId.slice(0, 3) + '-' + roomId.slice(3)
-    copyBtn.textContent = 'Copy'
+    copyBtn.textContent = t('copy')
     setView('lobby')
   },
   showSession()       { setView('session') },
 
   setPeerStatus(state, peerName) {
-    const label = {
-      waiting:      '● Waiting for peer',
-      connected:    `● Connected${peerName ? ` to ${peerName}` : ''}`,
-      disconnected: '● Peer disconnected',
-    }[state] ?? state
-    peerStatusEl.textContent = label
+    _peerState = state
+    _peerName  = peerName ?? null
+    peerStatusEl.textContent = peerStatusLabel(state, peerName)
     peerStatusEl.className = `status-dot ${state}`
 
     const on = state === 'connected'
@@ -213,16 +297,16 @@ export const UI = {
 
     if (state === 'disconnected') {
       for (const item of _sendItems) {
-        if (item.state === 'active') item.labelEl.textContent = `Stalled: ${item.fileName}`
+        if (item.state === 'active') item.labelEl.textContent = `${t('stalled')}: ${item.fileName}`
       }
-      if (_recvItem) _recvItem.labelEl.textContent = `Stalled: ${_recvItem.fileName ?? 'incoming file'}`
+      if (_recvItem) _recvItem.labelEl.textContent = `${t('stalled')}: ${_recvItem.fileName ?? '…'}`
     }
   },
 
   addMessage(msg) {
     const div = document.createElement('div')
     div.className = `msg ${msg.from}`
-    const t = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    const ts = new Date(msg.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     const who = msg.from === 'me' ? (_localName || 'You') : (msg.displayName || 'Them')
 
     const whoSpan = document.createElement('span')
@@ -231,7 +315,7 @@ export const UI = {
 
     const tsSpan = document.createElement('span')
     tsSpan.className = 'ts'
-    tsSpan.textContent = t
+    tsSpan.textContent = ts
 
     div.append(whoSpan, ' ', tsSpan, ': ', msg.text)
     messagesEl.appendChild(div)
@@ -241,7 +325,7 @@ export const UI = {
   // Called when a file is added to the queue but sending hasn't started yet
   fileQueued(fileName) {
     const item = makeSendItem(fileName, 'queued')
-    item.labelEl.textContent = `Queued: ${fileName}`
+    item.labelEl.textContent = `${t('queued')}: ${fileName}`
   },
 
   // Called just before Transfer.sendFile begins for this file
@@ -251,7 +335,7 @@ export const UI = {
     item.state = 'active'
     item.el.className = 'transfer-item'
     item.progressEl.value = 0
-    item.labelEl.textContent = `Sending: ${fileName}…`
+    item.labelEl.textContent = `${t('sending')}: ${fileName}…`
   },
 
   updateSendProgress({ fileName, percent, bytesTransferred, totalBytes, speed }) {
@@ -264,11 +348,11 @@ export const UI = {
     if (percent === 100) {
       item.state = 'done'
       item.el.className = 'transfer-item done'
-      item.labelEl.textContent = `Sent: ${fileName}${speed ? ` (avg ${fmtSpeed(speed)})` : ''}`
+      item.labelEl.textContent = `${t('sent')}: ${fileName}${speed ? ` (avg ${fmtSpeed(speed)})` : ''}`
       if (!_recvItem) document.title = PAGE_TITLE
     } else {
       item.labelEl.textContent =
-        `Sending: ${fileName} — ${percent}% (${fmt(bytesTransferred)} / ${fmt(totalBytes)}) @ ${fmtSpeed(speed)}`
+        `${t('sending')}: ${fileName} — ${percent}% (${fmt(bytesTransferred)} / ${fmt(totalBytes)}) @ ${fmtSpeed(speed)}`
       if (!_recvItem) document.title = `↑ ${percent}% — ${PAGE_TITLE}`
     }
   },
@@ -278,7 +362,7 @@ export const UI = {
     if (!item) return
     item.state = 'error'
     item.el.className = 'transfer-item error'
-    item.labelEl.textContent = `Error: ${fileName} — ${errMsg}`
+    item.labelEl.textContent = `${t('errorLabel')}: ${fileName} — ${errMsg}`
     if (!_recvItem) document.title = PAGE_TITLE
   },
 
@@ -301,7 +385,7 @@ export const UI = {
     _lastRecvUpdate = now
     _recvItem.progressEl.value = percent
     _recvItem.labelEl.textContent =
-      `Receiving: ${fileName} — ${percent}% (${fmt(bytesTransferred)} / ${fmt(totalBytes)}) @ ${fmtSpeed(speed)}`
+      `${t('receiving')}: ${fileName} — ${percent}% (${fmt(bytesTransferred)} / ${fmt(totalBytes)}) @ ${fmtSpeed(speed)}`
     document.title = `↓ ${percent}% — ${PAGE_TITLE}`
   },
 
@@ -313,11 +397,11 @@ export const UI = {
 
     const url = URL.createObjectURL(blob)
     const nameSpan = document.createElement('span')
-    nameSpan.textContent = `Received: ${fileName}`
+    nameSpan.textContent = `${t('received')}: ${fileName}`
     const saveLink = document.createElement('a')
     saveLink.href = url
     saveLink.download = fileName
-    saveLink.textContent = ' [Save]'
+    saveLink.textContent = ` ${t('save')}`
     saveLink.style.marginLeft = '8px'
     saveLink.addEventListener('click', () => setTimeout(() => URL.revokeObjectURL(url), 10_000))
     nameSpan.appendChild(saveLink)

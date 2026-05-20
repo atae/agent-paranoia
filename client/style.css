@@ -252,3 +252,176 @@ button:disabled { color: #aaa; cursor: default; }
   font-family: inherit;
   border: 1px solid #bbb;
 }
+
+/* ── Theme toggle ── */
+.theme-toggle {
+  position: fixed;
+  bottom: 14px;
+  right: 14px;
+  z-index: 200;
+  padding: 3px 9px;
+  font-size: 0.72rem;
+  border: 1px solid #bbb;
+  background: #f8f8f8;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.15s;
+}
+.theme-toggle:hover { opacity: 1; background: #f0f0f0; }
+
+/* ════════════════════════════════════════
+   JP THEME  —  web 1.0 Japanese style
+   ════════════════════════════════════════ */
+
+body.jp {
+  font-family: "MS PGothic", "MS Gothic", "Meiryo", "ヒラギノ角ゴ Pro W3", "Hiragino Kaku Gothic Pro", Osaka, sans-serif;
+  font-size: 12px;
+  background: #ffffee url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='4' height='4'%3E%3Crect width='1' height='1' fill='%23e8e8cc' opacity='0.6'/%3E%3C/svg%3E");
+  color: #000033;
+}
+
+body.jp .view { max-width: 600px; }
+
+/* Logo */
+body.jp .logo {
+  font-size: 0.9rem;
+  background: #000080;
+  color: #ffff00;
+  padding: 5px 10px;
+  margin: 0 0 14px;
+  border: 2px outset #8888cc;
+  letter-spacing: 0.08em;
+}
+body.jp .logo::before { content: "★ "; }
+body.jp .logo::after  { content: " ★"; }
+
+/* Buttons */
+body.jp button {
+  font-family: inherit;
+  background: #d4d0c8;
+  border: 2px outset #ffffff;
+  color: #000000;
+  padding: 3px 12px;
+}
+body.jp button:hover:not(:disabled) { background: #c8c4bc; }
+body.jp button:active:not(:disabled) { border-style: inset; }
+body.jp button:disabled { color: #888; }
+
+body.jp .btn-primary {
+  background: #000080;
+  color: #ffffff;
+  border: 2px outset #8888cc;
+  font-weight: bold;
+  letter-spacing: 0.05em;
+}
+body.jp .btn-primary:hover:not(:disabled) { background: #0000aa; border-color: #aaaaee; }
+
+/* Inputs */
+body.jp input[type="text"],
+body.jp .code-input {
+  background: #fffff8;
+  border: 2px inset #808080;
+  color: #000033;
+  font-family: inherit;
+}
+body.jp .code-input:focus { outline: 1px dotted #0000ff; outline-offset: 1px; }
+
+/* Home */
+body.jp .name-display       { color: #000080; font-size: 0.8rem; }
+body.jp .name-display a     { color: #0000ee; }
+body.jp .or-divider         { color: #888866; }
+body.jp .or-divider::before,
+body.jp .or-divider::after  { background: #cccc99; }
+
+/* Lobby */
+body.jp .muted { color: #666644; }
+
+body.jp .room-code {
+  font-size: 2.2rem;
+  color: #cc0000;
+  background: #fffff0;
+  border: 2px inset #808080;
+  padding: 6px 18px;
+  display: inline-block;
+  letter-spacing: 0.3em;
+}
+
+body.jp .cancel-btn       { color: #0000ee; background: none; border: none; }
+body.jp .cancel-btn:hover { color: #cc0000; background: none; text-decoration: underline; }
+
+body.jp .spinner {
+  border-color: #cccc99;
+  border-top-color: #000080;
+}
+
+/* Session topbar */
+body.jp .topbar {
+  background: #000080;
+  color: #ffffff;
+  padding: 5px 10px;
+  margin-bottom: 14px;
+  border: 2px outset #8888cc;
+}
+body.jp .topbar strong { color: #ffff00; }
+
+body.jp .status-dot.waiting      { color: #aaaacc; }
+body.jp .status-dot.connected    { color: #00ff88; }
+body.jp .status-dot.disconnected { color: #ff4444; }
+
+/* Chat panel */
+body.jp .chat-panel {
+  border: 2px inset #808080;
+  background: #fffff8;
+}
+body.jp .panel-header {
+  background: #000080;
+  color: #ffffff;
+  border-bottom: 2px solid #0000cc;
+  padding: 5px 10px;
+}
+body.jp .export-group button {
+  background: #d4d0c8;
+  border: 2px outset #ffffff;
+  color: #000000;
+  padding: 1px 7px;
+  font-size: 0.75rem;
+}
+
+body.jp .messages           { background: #fffff8; }
+body.jp .msg.me   .who      { color: #cc0000; }
+body.jp .msg.them .who      { color: #0000cc; }
+body.jp .msg .ts            { color: #888866; }
+
+body.jp .chat-foot          { background: #f0f0e0; border-top: 2px inset #808080; }
+body.jp .chat-foot button   { border: none; border-left: 2px inset #808080; background: #d4d0c8; }
+body.jp .chat-foot button:hover:not(:disabled) { background: #c8c4bc; }
+
+/* Dropzone */
+body.jp .dropzone {
+  border: 2px dashed #0000cc;
+  background: #fffff0;
+  color: #000080;
+}
+body.jp .dropzone.over  { border-color: #cc0000; background: #fff8f0; }
+body.jp .dropzone label { color: #0000ee; text-decoration: underline; }
+
+/* Transfer items */
+body.jp .transfer-item.done  .t-label { color: #006600; }
+body.jp .transfer-item.error .t-label { color: #cc0000; }
+
+/* Modal */
+body.jp .modal-overlay { background: rgba(0,0,128,0.55); }
+body.jp .modal-box {
+  background: #ffffee;
+  border: 2px outset #808080;
+  box-shadow: 4px 4px 0 #000033;
+}
+body.jp .modal-box label { color: #000080; }
+
+/* Theme toggle in JP mode */
+body.jp .theme-toggle {
+  background: #d4d0c8;
+  border: 2px outset #ffffff;
+  color: #000000;
+  opacity: 0.7;
+}

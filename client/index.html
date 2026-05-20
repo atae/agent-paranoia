@@ -68,12 +68,14 @@
     </div>
 
     <div id="dropzone" class="dropzone">
-      Drop a file here or <label for="fileInput">browse</label>
+      <span id="dropText">Drop a file here or </span><label for="fileInput" id="browseLabel">browse</label>
       <input type="file" id="fileInput" hidden />
     </div>
     <div id="sendQueue"></div>
     <div id="receiveArea"></div>
   </div>
+
+  <button id="themeToggle" class="theme-toggle">日本語</button>
 
   <script type="module" src="/src/main.js"></script>
 </body>

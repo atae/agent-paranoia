@@ -6,7 +6,7 @@ import { Server } from 'socket.io'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const CLIENT_DIR = path.resolve(__dirname, '..', 'client')
-const PORT = 7654
+const PORT = process.env.PORT || 7654
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',

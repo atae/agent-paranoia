@@ -4,9 +4,9 @@ A self-hosted, browser-native P2P file transfer and chat app. Files and messages
 
 ## Screenshots
 
-| Home | Lobby | Session |
-|------|-------|---------|
-| ![Home screen](screenshots/02-home.png) | ![Lobby with room code](screenshots/03-lobby.png) | ![Live session with chat](screenshots/04-session-alice.png) |
+| Home | Lobby | Session | File transfer |
+|------|-------|---------|---------------|
+| ![Home screen](screenshots/02-home.png) | ![Lobby with room code](screenshots/03-lobby.png) | ![Live session with chat](screenshots/04-session-alice.png) | ![File transfer in progress](screenshots/05-file-transfer.png) |
 
 ## Architecture
 

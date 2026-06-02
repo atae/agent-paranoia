@@ -4,3 +4,4 @@ node_modules/
 *.key
 *.pem
 headscale/
+webrtc-app-spec.md

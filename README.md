@@ -2,6 +2,12 @@
 
 A self-hosted, browser-native P2P file transfer and chat app. Files and messages travel directly between peers over an encrypted WebRTC DataChannel — they never touch the server. No accounts, no installs, no stored data.
 
+## Screenshots
+
+| Home | Lobby | Session |
+|------|-------|---------|
+| ![Home screen](screenshots/02-home.png) | ![Lobby with room code](screenshots/03-lobby.png) | ![Live session with chat](screenshots/04-session-alice.png) |
+
 ## Architecture
 
 ```

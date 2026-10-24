@@ -3,6 +3,7 @@ import { WebRTC }    from '/src/webrtc.js'
 import { Chat }      from '/src/chat.js'
 import { Transfer }  from '/src/transfer.js'
 import { UI }        from '/src/ui.js'
+import { Downloads } from '/src/downloads.js'
 
 // ── State ─────────────────────────────────────────────────────────────────
 let roomId = null
@@ -32,9 +33,13 @@ async function processQueue() {
   UI.fileStarted(file.name)
 
   try {
-    await Transfer.sendFile(file, chunk => WebRTC.sendFileChunk(chunk), progress => {
-      UI.updateSendProgress(progress)
-    })
+    const result = await Transfer.sendFile(
+      file,
+      chunk => WebRTC.sendFileChunk(chunk),
+      progress => UI.updateSendProgress(progress),
+      () => WebRTC.fileBufferedAmount(),
+    )
+    if (result === 'declined') UI.fileDeclined(file.name)
   } catch (err) {
     UI.fileFailed(file.name, err.message)
   } finally {
@@ -60,11 +65,43 @@ function onChatMessage(msg) {
   UI.addMessage(stored)
 }
 
+const sendControl = msg => WebRTC.sendFileChunk(msg)
+
+// Peer offered a file: ask, then open a file in the download folder (if set)
+// or fall back to collecting it in memory.
+async function onFileOffer(meta) {
+  const accepted = await UI.showOffer({ ...meta, from: peerDisplayName })
+  if (!accepted) {
+    Transfer.decline(meta, sendControl)
+    return
+  }
+  let target = {}
+  if (Downloads.folderName()) {
+    try {
+      target = await Downloads.openWritable(meta.name)
+    } catch (err) {
+      console.warn('[downloads] falling back to memory:', err)
+    }
+  }
+  Transfer.accept(meta, target, sendControl)
+}
+
 function onFileChunk(data) {
-  Transfer.handleIncoming(data,
-    progress  => UI.updateRecvProgress(progress),
-    completed => UI.recvComplete(completed),
-  )
+  Transfer.handleIncoming(data, {
+    onOffer:    meta     => onFileOffer(meta),
+    onProgress: progress => UI.updateRecvProgress(progress),
+    onComplete: result   => UI.recvComplete(result),
+    onError:    (name, message) => UI.recvFailed(name, message),
+  })
+}
+
+// Connection gone: unblock a waiting sender, drop half-received files,
+// and close any open accept dialog.
+function endTransfers() {
+  fileQueue.length = 0
+  transferInProgress = false
+  Transfer.reset()
+  UI.closeOffer()
 }
 
 function onConnectionChange(state) {
@@ -75,8 +112,7 @@ function onConnectionChange(state) {
     // Without this, a join that never connects looks like nothing happened.
     if (state === 'failed') alert("Couldn't connect to the other person. Check that you're both on Tailscale and try joining again.")
     UI.setPeerStatus('disconnected', null)
-    fileQueue.length = 0
-    transferInProgress = false
+    endTransfers()
   }
 }
 
@@ -108,6 +144,19 @@ UI.init({
     enqueueFile(file)
   },
 
+  async onChooseFolder() {
+    try {
+      UI.setDownloadFolder(await Downloads.chooseFolder(), Downloads.supported)
+    } catch (err) {
+      if (err.name !== 'AbortError') alert(`Couldn't use that folder: ${err.message}`)
+    }
+  },
+
+  async onClearFolder() {
+    await Downloads.clearFolder()
+    UI.setDownloadFolder(null, Downloads.supported)
+  },
+
   onExport(format) {
     if (format === 'txt') {
       const txt = Chat.exportTxt()
@@ -124,7 +173,7 @@ UI.init({
 
 // Warn before unload during active transfer
 window.addEventListener('beforeunload', e => {
-  if (transferInProgress) { e.preventDefault(); e.returnValue = '' }
+  if (transferInProgress || Transfer.isReceiving()) { e.preventDefault(); e.returnValue = '' }
 })
 
 // ── Signaling ─────────────────────────────────────────────────────────────
@@ -132,8 +181,10 @@ window.addEventListener('beforeunload', e => {
 try {
   WebRTC.configure(await (await fetch('/config.json', { cache: 'no-store' })).json())
 } catch (e) {
-  console.warn('[config] could not load /config.json, using default STUN', e)
+  console.warn('[config] could not load /config.json; no STUN server, so only same-network peers can connect', e)
 }
+await Downloads.init()
+UI.setDownloadFolder(Downloads.folderName(), Downloads.supported)
 Signaling.connect(window.location.origin)
 
 Signaling.on('room-created', ({ roomId: id }) => {
@@ -175,6 +226,5 @@ Signaling.on('ice-candidate', async ({ candidate }) => {
 
 Signaling.on('peer-left', () => {
   UI.setPeerStatus('disconnected', null)
-  fileQueue.length = 0
-  transferInProgress = false
+  endTransfers()
 })

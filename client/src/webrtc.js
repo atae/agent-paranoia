@@ -1,8 +1,7 @@
-// Replaced at startup by WebRTC.configure() with the server's /config.json,
-// which comes from the STUN_URLS env var on the server.
-let ICE_CONFIG = {
-  iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-}
+// Set at startup by WebRTC.configure() from the server's /config.json, which
+// comes from the STUN_URLS env var. No third-party default: without STUN only
+// peers on the same network can connect.
+let ICE_CONFIG = { iceServers: [] }
 
 let _pc = null
 let _chatChannel = null
@@ -91,7 +90,7 @@ function unblockPendingChunk() {
 
 export const WebRTC = {
   configure(config) {
-    if (config?.iceServers?.length) ICE_CONFIG = { iceServers: config.iceServers }
+    if (Array.isArray(config?.iceServers)) ICE_CONFIG = { iceServers: config.iceServers }
     console.log('[webrtc] ICE servers:', JSON.stringify(ICE_CONFIG.iceServers))
   },
 
@@ -204,6 +203,11 @@ export const WebRTC = {
         resolve()
       }
     })
+  },
+
+  // Bytes queued on the file channel but not yet handed to the network.
+  fileBufferedAmount() {
+    return _fileChannel?.readyState === 'open' ? _fileChannel.bufferedAmount : 0
   },
 
   close() {

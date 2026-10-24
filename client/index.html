@@ -75,7 +75,43 @@
     <div id="receiveArea"></div>
   </div>
 
-  <button id="themeToggle" class="theme-toggle">日本語</button>
+  <!-- Settings -->
+  <div id="settingsModal" class="modal-overlay" hidden>
+    <div class="modal-box settings-box" role="dialog" aria-labelledby="settingsTitle">
+      <label id="settingsTitle">Settings</label>
+      <div class="setting-row">
+        <div class="setting-name" id="folderLabel">Download folder</div>
+        <div id="folderValue" class="setting-value"></div>
+        <div id="folderActions" class="setting-actions">
+          <button id="chooseFolderBtn">Choose folder…</button>
+          <button id="clearFolderBtn">Clear</button>
+        </div>
+      </div>
+      <div class="modal-foot">
+        <button id="closeSettingsBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Incoming file offer -->
+  <div id="offerModal" class="modal-overlay" hidden>
+    <div class="modal-box offer-box" role="dialog" aria-labelledby="offerTitle">
+      <label id="offerTitle">Incoming file</label>
+      <p id="offerFrom" class="offer-from"></p>
+      <p id="offerFile" class="offer-file"></p>
+      <p id="offerDest" class="muted"></p>
+      <p id="offerWarn" class="offer-warn" hidden></p>
+      <div class="modal-foot">
+        <button id="declineBtn">Decline</button>
+        <button id="acceptBtn" class="btn-accept">Accept</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="corner-buttons">
+    <button id="settingsBtn" class="theme-toggle">Settings</button>
+    <button id="themeToggle" class="theme-toggle">日本語</button>
+  </div>
 
   <script type="module" src="/src/main.js"></script>
 </body>

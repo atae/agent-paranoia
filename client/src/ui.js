@@ -20,6 +20,11 @@ const sendBtnEl          = document.getElementById('sendBtn')
 const dropzone           = document.getElementById('dropzone')
 const sendQueueEl        = document.getElementById('sendQueue')
 const receiveAreaEl      = document.getElementById('receiveArea')
+const settingsModal      = document.getElementById('settingsModal')
+const folderValueEl      = document.getElementById('folderValue')
+const folderActionsEl    = document.getElementById('folderActions')
+const clearFolderBtn     = document.getElementById('clearFolderBtn')
+const offerModal         = document.getElementById('offerModal')
 
 const PROGRESS_INTERVAL_MS = 250
 
@@ -55,7 +60,32 @@ const TX = {
   received:        { en: 'Received',                      jp: '受信完了' },
   stalled:         { en: 'Stalled',                       jp: '停止' },
   save:            { en: '[Save]',                        jp: '[保存]' },
+  settings:        { en: 'Settings',                      jp: '設定' },
+  downloadFolder:  { en: 'Download folder',               jp: '保存先フォルダ' },
+  folderNotSet:    { en: 'Not set. Received files stay in memory until you click [Save], so very large files can crash the tab.',
+                     jp: '未設定。受信したファイルは[保存]を押すまでメモリに保持されるため、大きなファイルではタブがクラッシュすることがあります。' },
+  folderUnsupported: { en: "This browser can't save straight to a folder (Chrome and Edge can). Received files stay in memory until you click [Save].",
+                     jp: 'このブラウザはフォルダへの直接保存に対応していません（Chrome・Edgeは対応）。受信したファイルは[保存]を押すまでメモリに保持されます。' },
+  chooseFolder:    { en: 'Choose folder…',                jp: 'フォルダを選択…' },
+  changeFolder:    { en: 'Change folder…',                jp: 'フォルダを変更…' },
+  clearFolder:     { en: 'Clear',                         jp: 'クリア' },
+  close:           { en: 'Close',                         jp: '閉じる' },
+  incomingFile:    { en: 'Incoming file',                 jp: 'ファイル受信' },
+  yourPeer:        { en: 'Your peer',                     jp: '相手' },
+  saveTo:          { en: 'Will be saved to:',             jp: '保存先:' },
+  saveToMemory:    { en: 'Kept in memory until you click [Save].', jp: '[保存]を押すまでメモリに保持されます。' },
+  memoryWarn:      { en: 'This is a large file and no download folder is set, so it will be held in memory and may crash the tab. Set a folder in Settings to save it straight to disk.',
+                     jp: '大きなファイルですが保存先フォルダが未設定のため、メモリに保持されタブがクラッシュする可能性があります。設定でフォルダを指定すると直接ディスクに保存できます。' },
+  accept:          { en: 'Accept',                        jp: '受け取る' },
+  decline:         { en: 'Decline',                       jp: '断る' },
+  declined:        { en: 'Declined',                      jp: '受け取り拒否' },
+  saved:           { en: 'Saved',                         jp: '保存完了' },
+  failed:          { en: 'Failed',                        jp: '失敗' },
+  awaitingAccept:  { en: 'Waiting for them to accept',    jp: '相手の承認待ち' },
 }
+
+// Above this size, warn before holding a file in memory.
+const MEMORY_WARN_BYTES = 500 * 1024 ** 2
 
 function t(key) {
   const lang = document.body.classList.contains('jp') ? 'jp' : 'en'
@@ -80,6 +110,15 @@ function applyTranslations() {
   document.getElementById('browseLabel').textContent            = t('browse')
   peerStatusEl.textContent = peerStatusLabel(_peerState, _peerName)
   if (_localName) renderNameDisplay()
+  document.getElementById('settingsBtn').textContent      = t('settings')
+  document.getElementById('settingsTitle').textContent    = t('settings')
+  document.getElementById('folderLabel').textContent      = t('downloadFolder')
+  clearFolderBtn.textContent                              = t('clearFolder')
+  document.getElementById('closeSettingsBtn').textContent = t('close')
+  document.getElementById('offerTitle').textContent       = t('incomingFile')
+  document.getElementById('acceptBtn').textContent        = t('accept')
+  document.getElementById('declineBtn').textContent       = t('decline')
+  renderFolder()
 }
 
 // ── State ─────────────────────────────────────────────────────────────────
@@ -90,6 +129,9 @@ let _lastSendUpdate = 0
 let _lastRecvUpdate = 0
 let _peerState = 'waiting'
 let _peerName  = null
+let _folderName = null
+let _folderSupported = false
+let _offerResolve = null   // pending answer for the open incoming-file dialog
 
 // Send items: array of { fileName, state, el, labelEl, progressEl }
 // state: 'queued' | 'active' | 'done' | 'error'
@@ -105,6 +147,28 @@ function peerStatusLabel(state, peerName) {
       : `● ${t('connected')}`
   }
   return { waiting: t('waitingStatus'), disconnected: t('disconnected') }[state] ?? state
+}
+
+function renderFolder() {
+  const chooseBtn = document.getElementById('chooseFolderBtn')
+  folderActionsEl.hidden = !_folderSupported
+  clearFolderBtn.hidden = !_folderName
+  chooseBtn.textContent = t(_folderName ? 'changeFolder' : 'chooseFolder')
+  folderValueEl.classList.toggle('unset', !_folderName)
+  folderValueEl.textContent = !_folderSupported ? t('folderUnsupported')
+    : _folderName ? `📁 ${_folderName}` : t('folderNotSet')
+}
+
+function answerOffer(accepted) {
+  const resolve = _offerResolve
+  _offerResolve = null
+  offerModal.hidden = true
+  resolve?.(accepted)
+}
+
+function speedSuffix(speed) {
+  const s = fmtSpeed(speed)
+  return s ? ` @ ${s}` : ''
 }
 
 function setView(name) {
@@ -246,6 +310,22 @@ export const UI = {
       if (file) _cbs.onSendFile?.(file)
     })
     dropzone.addEventListener('click', () => document.getElementById('fileInput').click())
+
+    // Settings
+    document.getElementById('settingsBtn').addEventListener('click', () => {
+      renderFolder()
+      settingsModal.hidden = false
+    })
+    const closeSettings = () => { settingsModal.hidden = true }
+    document.getElementById('closeSettingsBtn').addEventListener('click', closeSettings)
+    settingsModal.addEventListener('click', e => { if (e.target === settingsModal) closeSettings() })
+    document.addEventListener('keydown', e => { if (e.key === 'Escape' && !settingsModal.hidden) closeSettings() })
+    document.getElementById('chooseFolderBtn').addEventListener('click', () => _cbs.onChooseFolder?.())
+    clearFolderBtn.addEventListener('click', () => _cbs.onClearFolder?.())
+
+    // Incoming file dialog (no click-outside dismiss: it needs an answer)
+    document.getElementById('acceptBtn').addEventListener('click', () => answerOffer(true))
+    document.getElementById('declineBtn').addEventListener('click', () => answerOffer(false))
     document.getElementById('fileInput').addEventListener('change', e => {
       const file = e.target.files[0]
       if (file) _cbs.onSendFile?.(file)
@@ -335,7 +415,7 @@ export const UI = {
     item.state = 'active'
     item.el.className = 'transfer-item'
     item.progressEl.value = 0
-    item.labelEl.textContent = `${t('sending')}: ${fileName}…`
+    item.labelEl.textContent = `${t('awaitingAccept')}: ${fileName}…`
   },
 
   updateSendProgress({ fileName, percent, bytesTransferred, totalBytes, speed }) {
@@ -352,7 +432,7 @@ export const UI = {
       if (!_recvItem) document.title = PAGE_TITLE
     } else {
       item.labelEl.textContent =
-        `${t('sending')}: ${fileName} — ${percent}% (${fmt(bytesTransferred)} / ${fmt(totalBytes)}) @ ${fmtSpeed(speed)}`
+        `${t('sending')}: ${fileName} — ${percent}% (${fmt(bytesTransferred)} / ${fmt(totalBytes)})${speedSuffix(speed)}`
       if (!_recvItem) document.title = `↑ ${percent}% — ${PAGE_TITLE}`
     }
   },
@@ -385,28 +465,84 @@ export const UI = {
     _lastRecvUpdate = now
     _recvItem.progressEl.value = percent
     _recvItem.labelEl.textContent =
-      `${t('receiving')}: ${fileName} — ${percent}% (${fmt(bytesTransferred)} / ${fmt(totalBytes)}) @ ${fmtSpeed(speed)}`
+      `${t('receiving')}: ${fileName} — ${percent}% (${fmt(bytesTransferred)} / ${fmt(totalBytes)})${speedSuffix(speed)}`
     document.title = `↓ ${percent}% — ${PAGE_TITLE}`
   },
 
-  recvComplete({ fileName, blob }) {
+  recvComplete({ fileName, blob, savedAs, speed }) {
     document.title = PAGE_TITLE
-    if (!_recvItem) return
+    if (!_recvItem) {
+      // Empty files finish without any progress updates; give them a row too.
+      UI.updateRecvProgress({ fileName, percent: 0, bytesTransferred: 0, totalBytes: 0, speed: 0 })
+    }
     _recvItem.el.className = 'transfer-item done'
     _recvItem.progressEl.value = 100
+    const avg = fmtSpeed(speed)
+    const avgText = avg ? ` (avg ${avg})` : ''
 
-    const url = URL.createObjectURL(blob)
     const nameSpan = document.createElement('span')
-    nameSpan.textContent = `${t('received')}: ${fileName}`
-    const saveLink = document.createElement('a')
-    saveLink.href = url
-    saveLink.download = fileName
-    saveLink.textContent = ` ${t('save')}`
-    saveLink.style.marginLeft = '8px'
-    saveLink.addEventListener('click', () => setTimeout(() => URL.revokeObjectURL(url), 10_000))
-    nameSpan.appendChild(saveLink)
+    if (savedAs) {
+      // Already written to the chosen folder; nothing left to click.
+      nameSpan.textContent = `${t('saved')}: ${_folderName ? `${_folderName}/` : ''}${savedAs}${avgText}`
+    } else {
+      const url = URL.createObjectURL(blob)
+      nameSpan.textContent = `${t('received')}: ${fileName}${avgText}`
+      const saveLink = document.createElement('a')
+      saveLink.href = url
+      saveLink.download = fileName
+      saveLink.textContent = ` ${t('save')}`
+      saveLink.style.marginLeft = '8px'
+      saveLink.addEventListener('click', () => setTimeout(() => URL.revokeObjectURL(url), 10_000))
+      nameSpan.appendChild(saveLink)
+    }
     _recvItem.labelEl.replaceChildren(nameSpan)
     _recvItem = null
+  },
+
+  recvFailed(fileName, errMsg) {
+    document.title = PAGE_TITLE
+    if (!_recvItem) return
+    _recvItem.el.className = 'transfer-item error'
+    _recvItem.labelEl.textContent = `${t('failed')}: ${fileName} — ${errMsg}`
+    _recvItem = null
+  },
+
+  fileDeclined(fileName) {
+    const item = findActiveSend(fileName)
+    if (!item) return
+    item.state = 'error'
+    item.el.className = 'transfer-item error'
+    item.labelEl.textContent = `${t('declined')}: ${fileName}`
+    if (!_recvItem) document.title = PAGE_TITLE
+  },
+
+  setDownloadFolder(name, supported) {
+    _folderName = name
+    _folderSupported = supported
+    renderFolder()
+  },
+
+  // Shows the incoming-file dialog. Resolves true (accept) or false (decline).
+  showOffer({ name, size, from }) {
+    answerOffer(false)   // never stack dialogs
+    const jp = document.body.classList.contains('jp')
+    const who = from || t('yourPeer')
+    document.getElementById('offerFrom').textContent =
+      jp ? `${who}からファイルが届いています:` : `${who} wants to send you:`
+    document.getElementById('offerFile').textContent = `${name} (${fmt(size)})`
+    document.getElementById('offerDest').textContent =
+      _folderName ? `${t('saveTo')} 📁 ${_folderName}` : t('saveToMemory')
+    const warnEl = document.getElementById('offerWarn')
+    warnEl.hidden = !!_folderName || size < MEMORY_WARN_BYTES
+    warnEl.textContent = t('memoryWarn')
+    offerModal.hidden = false
+    document.getElementById('acceptBtn').focus()
+    return new Promise(resolve => { _offerResolve = resolve })
+  },
+
+  // Peer left while the dialog was open.
+  closeOffer() {
+    answerOffer(false)
   },
 
 }

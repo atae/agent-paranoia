@@ -7,12 +7,20 @@ import { Server } from 'socket.io'
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const CLIENT_DIR = path.resolve(__dirname, '..', 'client')
 const PORT = process.env.PORT || 7654
+// Set HOST=127.0.0.1 when a reverse proxy (e.g. Tailscale Serve) sits in front,
+// so the plain-HTTP port isn't reachable from the LAN.
+// Unset = all interfaces (IPv4 and IPv6), same as before.
+const HOST = process.env.HOST || undefined
 
 // STUN servers handed to clients, e.g. STUN_URLS=stun:hako.example.ts.net:3478
-// Comma-separated. Falls back to Google STUN so local dev works with no setup.
-const STUN_URLS = (process.env.STUN_URLS || 'stun:stun.l.google.com:19302')
+// Comma-separated. Deliberately no third-party default: if unset, clients get
+// no STUN server and only peers on the same network can connect.
+const STUN_URLS = (process.env.STUN_URLS || '')
   .split(',').map(s => s.trim()).filter(Boolean)
-const CLIENT_CONFIG = JSON.stringify({ iceServers: [{ urls: STUN_URLS }] })
+const CLIENT_CONFIG = JSON.stringify({ iceServers: STUN_URLS.length ? [{ urls: STUN_URLS }] : [] })
+if (!STUN_URLS.length) {
+  console.warn('STUN_URLS is not set: peers on different networks will not be able to connect.')
+}
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -144,6 +152,6 @@ io.on('connection', (socket) => {
   socket.on('disconnect', leaveCurrentRoom)
 })
 
-server.listen(PORT, () => {
-  console.log(`Agent Paranoia signaling server running at http://localhost:${PORT}`)
+server.listen(PORT, HOST, () => {
+  console.log(`Agent Paranoia signaling server running on ${HOST ?? 'all interfaces'}, port ${PORT}`)
 })

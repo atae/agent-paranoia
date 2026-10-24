@@ -254,11 +254,15 @@ button:disabled { color: #aaa; cursor: default; }
 }
 
 /* ── Theme toggle ── */
-.theme-toggle {
+.corner-buttons {
   position: fixed;
   bottom: 14px;
   right: 14px;
   z-index: 200;
+  display: flex;
+  gap: 6px;
+}
+.theme-toggle {
   padding: 3px 9px;
   font-size: 0.72rem;
   border: 1px solid #bbb;
@@ -268,6 +272,30 @@ button:disabled { color: #aaa; cursor: default; }
   transition: opacity 0.15s;
 }
 .theme-toggle:hover { opacity: 1; background: #f0f0f0; }
+
+/* ── Settings & incoming-file dialogs ── */
+.settings-box, .offer-box { width: min(420px, calc(100vw - 32px)); }
+.setting-name  { font-size: 0.85rem; color: #555; margin-bottom: 4px; }
+.setting-value { margin-bottom: 10px; word-break: break-word; }
+.setting-value.unset { color: #777; font-size: 0.85rem; }
+.setting-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 20px;
+}
+.offer-from { margin: 0 0 6px; }
+.offer-file { margin: 0 0 10px; font-weight: bold; word-break: break-word; }
+.offer-warn {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-left: 3px solid #c80;
+  background: #fff8e8;
+  font-size: 0.85rem;
+}
+.btn-accept { background: #111; color: #fff; border-color: #111; }
+.btn-accept:hover:not(:disabled) { background: #333; }
 
 /* ════════════════════════════════════════
    JP THEME  —  web 1.0 Japanese style
@@ -425,3 +453,10 @@ body.jp .theme-toggle {
   color: #000000;
   opacity: 0.7;
 }
+
+/* Settings & incoming-file dialogs in JP mode */
+body.jp .setting-name { color: #000080; }
+body.jp .offer-warn   { border-left-color: #cc0000; background: #ffffe0; }
+body.jp .btn-accept   { background: #000080; color: #ffffff; border: 2px outset #8888cc; }
+body.jp .btn-accept:hover:not(:disabled) { background: #0000aa; }
+

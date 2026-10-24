@@ -50,7 +50,26 @@ function generateRoomId() {
 io.on('connection', (socket) => {
   let currentRoomId = null
 
+  // A socket belongs to at most one room. Before creating or joining another,
+  // leave the current one; otherwise the old room keeps a ghost entry for this
+  // socket that disconnect never cleans up, and it reports "Room is full" forever.
+  function leaveCurrentRoom() {
+    if (!currentRoomId) return
+    const roomId = currentRoomId
+    currentRoomId = null
+    socket.leave(roomId)
+    const room = rooms.get(roomId)
+    if (!room) return
+    room.peers = room.peers.filter(id => id !== socket.id)
+    if (room.peers.length === 0) {
+      rooms.delete(roomId)
+    } else {
+      socket.to(roomId).emit('peer-left')
+    }
+  }
+
   socket.on('create-room', ({ displayName } = {}) => {
+    leaveCurrentRoom()
     if (rooms.size >= MAX_ROOMS) {
       socket.emit('room-error', { message: 'Server is full' })
       return
@@ -70,14 +89,24 @@ io.on('connection', (socket) => {
     }, 5 * 60 * 1000)
   })
 
-  socket.on('join-room', ({ roomId, displayName }) => {
-    const room = rooms.get(roomId)
-    if (!room) {
+  socket.on('join-room', ({ roomId, displayName } = {}) => {
+    const target = rooms.get(roomId)
+    if (!target) {
       socket.emit('room-error', { message: 'Room not found' })
       return
     }
-    if (room.peers.length >= 2) {
+    // Don't count this socket itself, so retrying a join that failed to
+    // connect re-joins cleanly instead of hitting "Room is full".
+    if (target.peers.filter(id => id !== socket.id).length >= 2) {
       socket.emit('room-error', { message: 'Room is full' })
+      return
+    }
+    // Leaving first means a retry of the same room notifies the creator
+    // (peer-left, then peer-joined), which makes them send a fresh offer.
+    leaveCurrentRoom()
+    const room = rooms.get(roomId)
+    if (!room) {
+      socket.emit('room-error', { message: 'Room not found' })
       return
     }
     room.peers.push(socket.id)
@@ -100,17 +129,7 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('ice-candidate', { candidate })
   })
 
-  socket.on('disconnect', () => {
-    if (!currentRoomId) return
-    const room = rooms.get(currentRoomId)
-    if (!room) return
-    room.peers = room.peers.filter(id => id !== socket.id)
-    if (room.peers.length === 0) {
-      rooms.delete(currentRoomId)
-    } else {
-      socket.to(currentRoomId).emit('peer-left')
-    }
-  })
+  socket.on('disconnect', leaveCurrentRoom)
 })
 
 server.listen(PORT, () => {

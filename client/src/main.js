@@ -72,6 +72,8 @@ function onConnectionChange(state) {
     UI.showSession()
     UI.setPeerStatus('connected', peerDisplayName)
   } else {
+    // Without this, a join that never connects looks like nothing happened.
+    if (state === 'failed') alert("Couldn't connect to the other person. Check that you're both on Tailscale and try joining again.")
     UI.setPeerStatus('disconnected', null)
     fileQueue.length = 0
     transferInProgress = false
@@ -126,6 +128,12 @@ window.addEventListener('beforeunload', e => {
 })
 
 // ── Signaling ─────────────────────────────────────────────────────────────
+// Load STUN settings before connecting so no peer connection uses the defaults.
+try {
+  WebRTC.configure(await (await fetch('/config.json', { cache: 'no-store' })).json())
+} catch (e) {
+  console.warn('[config] could not load /config.json, using default STUN', e)
+}
 Signaling.connect(window.location.origin)
 
 Signaling.on('room-created', ({ roomId: id }) => {

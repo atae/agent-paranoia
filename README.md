@@ -80,13 +80,13 @@ server {
 
 ## Switching to self-hosted STUN
 
-Replace the ICE config in `client/src/webrtc.js`:
+Set `STUN_URLS` on the server (comma-separated). Clients load it from `/config.json` at startup; without it they fall back to Google STUN.
 
-```javascript
-const ICE_CONFIG = {
-  iceServers: [{ urls: 'stun:YOUR_SERVER_IP:3478' }]
-}
+```bash
+STUN_URLS=stun:YOUR_SERVER:3478 node signaling.js
 ```
+
+On a Tailscale/Headscale mesh, point this at the server's tailnet name or 100.x IP. Browsers hide local addresses (including tailnet ones) from WebRTC, so STUN reached over the mesh is how peers learn each other's tailnet addresses and connect through it. A public STUN server reports public IPs instead, which often can't reach each other without a TURN relay.
 
 ## Friend onboarding
 

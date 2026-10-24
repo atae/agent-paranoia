@@ -1,5 +1,6 @@
-// Temporary STUN for Phase 1 — replaced with self-hosted Coturn in Phase 2
-const ICE_CONFIG = {
+// Replaced at startup by WebRTC.configure() with the server's /config.json,
+// which comes from the STUN_URLS env var on the server.
+let ICE_CONFIG = {
   iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
 }
 
@@ -89,6 +90,11 @@ function unblockPendingChunk() {
 }
 
 export const WebRTC = {
+  configure(config) {
+    if (config?.iceServers?.length) ICE_CONFIG = { iceServers: config.iceServers }
+    console.log('[webrtc] ICE servers:', JSON.stringify(ICE_CONFIG.iceServers))
+  },
+
   init(signaling, roomId, onChatMessage, onFileChunk, onConnectionChange) {
     // Tear down any previous connection first so orphaned channels can't fire
     // stale onclose events into the new session.

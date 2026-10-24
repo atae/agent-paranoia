@@ -8,6 +8,12 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const CLIENT_DIR = path.resolve(__dirname, '..', 'client')
 const PORT = process.env.PORT || 7654
 
+// STUN servers handed to clients, e.g. STUN_URLS=stun:hako.example.ts.net:3478
+// Comma-separated. Falls back to Google STUN so local dev works with no setup.
+const STUN_URLS = (process.env.STUN_URLS || 'stun:stun.l.google.com:19302')
+  .split(',').map(s => s.trim()).filter(Boolean)
+const CLIENT_CONFIG = JSON.stringify({ iceServers: [{ urls: STUN_URLS }] })
+
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
@@ -16,6 +22,12 @@ const MIME_TYPES = {
 
 const server = http.createServer((req, res) => {
   const urlPath = req.url === '/' ? '/index.html' : req.url.split('?')[0]
+
+  if (urlPath === '/config.json') {
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+    res.end(CLIENT_CONFIG)
+    return
+  }
   const resolved = path.resolve(path.join(CLIENT_DIR, urlPath))
 
   // Prevent path traversal outside client dir

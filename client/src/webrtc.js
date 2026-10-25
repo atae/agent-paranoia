@@ -6,15 +6,17 @@ let ICE_CONFIG = { iceServers: [] }
 let _pc = null
 let _chatChannel = null
 let _fileChannel = null
+let _mediaChannel = null   // pasted images/video, separate so neither chat nor big files block it
 let _signaling = null
 let _roomId = null
 let _onChatMessage = null
 let _onFileChunk = null
+let _onMediaChunk = null
 let _onConnectionChange = null
 
-// Stored resolve for a sendFileChunk call that's waiting on backpressure.
-// onclose/onerror unblocks it so Transfer.sendFile doesn't hang forever.
-let _pendingChunkResolve = null
+// Stored resolve per channel for a send that's waiting on backpressure.
+// onclose/onerror unblocks it so a send loop doesn't hang forever.
+const _pendingResolves = new Map()
 let _iceTimeout = null
 
 // Null out all event handlers and close the current PC without firing any
@@ -29,11 +31,13 @@ function _teardown() {
     _chatChannel.onerror = null
     _chatChannel.onmessage = null
   }
-  if (_fileChannel) {
-    _fileChannel.onopen = null
-    _fileChannel.onclose = null
-    _fileChannel.onerror = null
-    _fileChannel.onmessage = null
+  for (const ch of [_fileChannel, _mediaChannel]) {
+    if (!ch) continue
+    ch.onopen = null
+    ch.onclose = null
+    ch.onerror = null
+    ch.onmessage = null
+    ch.onbufferedamountlow = null
   }
   if (_pc) {
     _pc.onicecandidate = null
@@ -43,7 +47,8 @@ function _teardown() {
   _pc = null
   _chatChannel = null
   _fileChannel = null
-  unblockPendingChunk()
+  _mediaChannel = null
+  unblockAll()
 }
 
 function attachChat(channel) {
@@ -67,25 +72,65 @@ function attachChat(channel) {
   }
 }
 
-function attachFile(channel) {
-  _fileChannel = channel
-  _fileChannel.binaryType = 'arraybuffer'
-  channel.onopen  = () => console.log('[file] opened — readyState:', channel.readyState, 'id:', channel.id)
+function attachBinary(channel, label, onData) {
+  channel.binaryType = 'arraybuffer'
+  channel.onopen  = () => console.log(`[${label}] opened — readyState:`, channel.readyState, 'id:', channel.id)
   channel.onclose = () => {
-    console.log('[file] closed')
-    unblockPendingChunk()
+    console.log(`[${label}] closed`)
+    unblock(channel)
   }
   channel.onerror = (e) => {
-    console.error('[file] error:', e)
-    unblockPendingChunk()
+    console.error(`[${label}] error:`, e)
+    unblock(channel)
   }
-  channel.onmessage = ({ data }) => _onFileChunk(data)
+  channel.onmessage = ({ data }) => onData(data)
+  return channel
 }
 
-function unblockPendingChunk() {
-  const r = _pendingChunkResolve
-  _pendingChunkResolve = null
+function unblock(channel) {
+  const r = _pendingResolves.get(channel)
+  _pendingResolves.delete(channel)
   r?.()
+}
+
+function unblockAll() {
+  for (const r of _pendingResolves.values()) r()
+  _pendingResolves.clear()
+}
+
+// Returns a Promise so send loops can await each chunk and respect backpressure.
+// If the channel closes while waiting for buffer to drain, the promise resolves
+// immediately (via unblock) so the loop exits rather than hanging.
+// MAX_BUFFER is 8 MB — well below Chrome's hard 16 MB limit — so a 64 KB chunk
+// can never tip the buffer over the browser's threshold between our check and send().
+function sendWithBackpressure(channel, chunk, label) {
+  return new Promise(resolve => {
+    if (!channel || channel.readyState !== 'open') { resolve(); return }
+
+    const MAX_BUFFER = 8 * 1024 * 1024
+    if (channel.bufferedAmount > MAX_BUFFER) {
+      channel.bufferedAmountLowThreshold = MAX_BUFFER / 2
+      _pendingResolves.set(channel, resolve)
+      channel.onbufferedamountlow = () => {
+        channel.onbufferedamountlow = null
+        const r = _pendingResolves.get(channel)
+        _pendingResolves.delete(channel)
+        try {
+          if (channel.readyState === 'open') channel.send(chunk)
+        } catch (e) {
+          console.error(`[${label}] send error after drain:`, e)
+        }
+        r?.()
+      }
+    } else {
+      try {
+        channel.send(chunk)
+      } catch (e) {
+        console.error(`[${label}] send error:`, e)
+      }
+      resolve()
+    }
+  })
 }
 
 export const WebRTC = {
@@ -94,7 +139,7 @@ export const WebRTC = {
     console.log('[webrtc] ICE servers:', JSON.stringify(ICE_CONFIG.iceServers))
   },
 
-  init(signaling, roomId, onChatMessage, onFileChunk, onConnectionChange) {
+  init(signaling, roomId, onChatMessage, onFileChunk, onConnectionChange, onMediaChunk) {
     // Tear down any previous connection first so orphaned channels can't fire
     // stale onclose events into the new session.
     _teardown()
@@ -104,6 +149,7 @@ export const WebRTC = {
     _onChatMessage = onChatMessage
     _onFileChunk = onFileChunk
     _onConnectionChange = onConnectionChange
+    _onMediaChunk = onMediaChunk
 
     _pc = new RTCPeerConnection(ICE_CONFIG)
 
@@ -132,7 +178,8 @@ export const WebRTC = {
     // Out-of-band negotiated channels: both peers create matching IDs independently.
     // This avoids the asymmetric ondatachannel timing problem on real networks.
     attachChat(_pc.createDataChannel('chat', { ordered: true, negotiated: true, id: 0 }))
-    attachFile(_pc.createDataChannel('file', { ordered: true, negotiated: true, id: 1 }))
+    _fileChannel = attachBinary(_pc.createDataChannel('file', { ordered: true, negotiated: true, id: 1 }), 'file', d => _onFileChunk(d))
+    _mediaChannel = attachBinary(_pc.createDataChannel('media', { ordered: true, negotiated: true, id: 2 }), 'media', d => _onMediaChunk?.(d))
 
     console.log('[webrtc] init complete — chat readyState:', _chatChannel.readyState, '| file readyState:', _fileChannel.readyState)
   },
@@ -170,44 +217,21 @@ export const WebRTC = {
     }
   },
 
-  // Returns a Promise so Transfer.sendFile can await each chunk and respect backpressure.
-  // If the channel closes while waiting for buffer to drain, the promise resolves
-  // immediately (via unblockPendingChunk) so the send loop exits rather than hanging.
-  // MAX_BUFFER is 8 MB — well below Chrome's hard 16 MB limit — so a 64 KB chunk
-  // can never tip the buffer over the browser's threshold between our check and send().
   sendFileChunk(chunk) {
-    return new Promise(resolve => {
-      if (!_fileChannel || _fileChannel.readyState !== 'open') { resolve(); return }
+    return sendWithBackpressure(_fileChannel, chunk, 'file')
+  },
 
-      const MAX_BUFFER = 8 * 1024 * 1024
-      if (_fileChannel.bufferedAmount > MAX_BUFFER) {
-        _fileChannel.bufferedAmountLowThreshold = MAX_BUFFER / 2
-        _pendingChunkResolve = resolve
-        _fileChannel.onbufferedamountlow = () => {
-          _fileChannel.onbufferedamountlow = null
-          const r = _pendingChunkResolve
-          _pendingChunkResolve = null
-          try {
-            if (_fileChannel.readyState === 'open') _fileChannel.send(chunk)
-          } catch (e) {
-            console.error('[file] send error after drain:', e)
-          }
-          r?.()
-        }
-      } else {
-        try {
-          _fileChannel.send(chunk)
-        } catch (e) {
-          console.error('[file] send error:', e)
-        }
-        resolve()
-      }
-    })
+  sendMediaChunk(chunk) {
+    return sendWithBackpressure(_mediaChannel, chunk, 'media')
   },
 
   // Bytes queued on the file channel but not yet handed to the network.
   fileBufferedAmount() {
     return _fileChannel?.readyState === 'open' ? _fileChannel.bufferedAmount : 0
+  },
+
+  mediaBufferedAmount() {
+    return _mediaChannel?.readyState === 'open' ? _mediaChannel.bufferedAmount : 0
   },
 
   close() {

@@ -3,9 +3,13 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "start": "node signaling.js"
+    "start": "node signaling.js",
+    "test": "node --test test/*.test.js"
   },
   "dependencies": {
     "socket.io": "^4.8.1"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.4"
   }
 }

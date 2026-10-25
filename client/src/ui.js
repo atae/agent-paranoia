@@ -25,6 +25,8 @@ const folderValueEl      = document.getElementById('folderValue')
 const folderActionsEl    = document.getElementById('folderActions')
 const clearFolderBtn     = document.getElementById('clearFolderBtn')
 const offerModal         = document.getElementById('offerModal')
+const serverBanner       = document.getElementById('serverBanner')
+const leaveBtn           = document.getElementById('leaveBtn')
 
 const PROGRESS_INTERVAL_MS = 250
 
@@ -82,6 +84,15 @@ const TX = {
   saved:           { en: 'Saved',                         jp: '保存完了' },
   failed:          { en: 'Failed',                        jp: '失敗' },
   awaitingAccept:  { en: 'Waiting for them to accept',    jp: '相手の承認待ち' },
+  leave:           { en: 'Leave',                         jp: '退出' },
+  leaveTitle:      { en: 'Leave and wipe this session (press Esc 3 times)', jp: '退出してこのセッションを消去（Escを3回）' },
+  serverOffline:   { en: 'Server offline: you can\'t create or join rooms until it\'s back.',
+                     jp: 'サーバーがオフラインです。復旧するまで部屋の作成・参加はできません。' },
+  serverOfflineInCall: { en: 'Server offline: this call keeps working, but don\'t reload the page.',
+                     jp: 'サーバーがオフラインです。通話は継続しますが、ページを再読み込みしないでください。' },
+  sendingMedia:    { en: 'sending',                       jp: '送信中' },
+  receivingMedia:  { en: 'receiving',                     jp: '受信中' },
+  mediaFailed:     { en: 'failed',                        jp: '失敗' },
 }
 
 // Above this size, warn before holding a file in memory.
@@ -118,7 +129,10 @@ function applyTranslations() {
   document.getElementById('offerTitle').textContent       = t('incomingFile')
   document.getElementById('acceptBtn').textContent        = t('accept')
   document.getElementById('declineBtn').textContent       = t('decline')
+  leaveBtn.textContent = t('leave')
+  leaveBtn.title = t('leaveTitle')
   renderFolder()
+  renderServerBanner()
 }
 
 // ── State ─────────────────────────────────────────────────────────────────
@@ -132,6 +146,10 @@ let _peerName  = null
 let _folderName = null
 let _folderSupported = false
 let _offerResolve = null   // pending answer for the open incoming-file dialog
+let _serverOnline = true
+let _bannerTimer = null
+const _mediaItems = new Map()   // key → { el, captionEl, mediaEl, name }
+const _objectUrls = new Set()   // revoked when the session is wiped
 
 // Send items: array of { fileName, state, el, labelEl, progressEl }
 // state: 'queued' | 'active' | 'done' | 'error'
@@ -157,6 +175,22 @@ function renderFolder() {
   folderValueEl.classList.toggle('unset', !_folderName)
   folderValueEl.textContent = !_folderSupported ? t('folderUnsupported')
     : _folderName ? `📁 ${_folderName}` : t('folderNotSet')
+}
+
+function renderServerBanner() {
+  serverBanner.hidden = _serverOnline
+  if (_serverOnline) return
+  serverBanner.textContent = t(!views.session.hidden && _peerState === 'connected' ? 'serverOfflineInCall' : 'serverOffline')
+}
+
+function trackUrl(blob) {
+  const url = URL.createObjectURL(blob)
+  _objectUrls.add(url)
+  return url
+}
+
+function mediaCaption(item, text) {
+  item.captionEl.textContent = text
 }
 
 function answerOffer(accepted) {
@@ -306,8 +340,7 @@ export const UI = {
     dropzone.addEventListener('drop', e => {
       e.preventDefault()
       dropzone.classList.remove('over')
-      const file = e.dataTransfer.files[0]
-      if (file) _cbs.onSendFile?.(file)
+      for (const file of e.dataTransfer.files) _cbs.onSendFile?.(file)
     })
     dropzone.addEventListener('click', () => document.getElementById('fileInput').click())
 
@@ -322,6 +355,37 @@ export const UI = {
     document.addEventListener('keydown', e => { if (e.key === 'Escape' && !settingsModal.hidden) closeSettings() })
     document.getElementById('chooseFolderBtn').addEventListener('click', () => _cbs.onChooseFolder?.())
     clearFolderBtn.addEventListener('click', () => _cbs.onClearFolder?.())
+
+    // Leave (wipes the session). Esc three times within a second does the
+    // same from anywhere — enough that it never happens by accident.
+    leaveBtn.addEventListener('click', () => _cbs.onLeave?.())
+    let escPresses = []
+    document.addEventListener('keydown', e => {
+      if (e.key !== 'Escape' || e.repeat) return
+      const now = Date.now()
+      escPresses = escPresses.filter(t => now - t < 1000)
+      escPresses.push(now)
+      if (escPresses.length >= 3 && views.home.hidden) {
+        escPresses = []
+        _cbs.onLeave?.()
+      }
+    })
+
+    // Paste or drop images/videos into the chat.
+    const sendPasted = files => { if (files.length && !chatInputEl.disabled) _cbs.onPasteFiles?.(files) }
+    document.addEventListener('paste', e => {
+      if (views.session.hidden) return
+      const files = [...(e.clipboardData?.files ?? [])]
+      if (!files.length) return
+      e.preventDefault()
+      sendPasted(files)
+    })
+    const chatPanel = document.querySelector('.chat-panel')
+    chatPanel.addEventListener('dragover', e => { e.preventDefault() })
+    chatPanel.addEventListener('drop', e => {
+      e.preventDefault()
+      sendPasted([...e.dataTransfer.files])
+    })
 
     // Incoming file dialog (no click-outside dismiss: it needs an answer)
     document.getElementById('acceptBtn').addEventListener('click', () => answerOffer(true))
@@ -352,17 +416,23 @@ export const UI = {
     receiveAreaEl.textContent = ''
     _sendItems.length = 0
     _recvItem = null
+    _mediaItems.clear()
+    for (const url of _objectUrls) URL.revokeObjectURL(url)
+    _objectUrls.clear()
+    document.getElementById('roomInput').value = ''
+    offerModal.hidden = true
+    settingsModal.hidden = true
     document.title = PAGE_TITLE
   },
 
-  showHome()          { setView('home') },
+  showHome()          { setView('home'); renderServerBanner() },
   showLobby(roomId)   {
     _roomId = roomId
     roomCodeEl.textContent = roomId.slice(0, 3) + '-' + roomId.slice(3)
     copyBtn.textContent = t('copy')
     setView('lobby')
   },
-  showSession()       { setView('session') },
+  showSession()       { setView('session'); renderServerBanner() },
 
   setPeerStatus(state, peerName) {
     _peerState = state
@@ -371,6 +441,7 @@ export const UI = {
     peerStatusEl.className = `status-dot ${state}`
 
     const on = state === 'connected'
+    renderServerBanner()
     chatInputEl.disabled = !on
     sendBtnEl.disabled   = !on
     dropzone.classList.toggle('disabled', !on)
@@ -485,14 +556,13 @@ export const UI = {
       // Already written to the chosen folder; nothing left to click.
       nameSpan.textContent = `${t('saved')}: ${_folderName ? `${_folderName}/` : ''}${savedAs}${avgText}`
     } else {
-      const url = URL.createObjectURL(blob)
+      const url = trackUrl(blob)
       nameSpan.textContent = `${t('received')}: ${fileName}${avgText}`
       const saveLink = document.createElement('a')
       saveLink.href = url
       saveLink.download = fileName
       saveLink.textContent = ` ${t('save')}`
       saveLink.style.marginLeft = '8px'
-      saveLink.addEventListener('click', () => setTimeout(() => URL.revokeObjectURL(url), 10_000))
       nameSpan.appendChild(saveLink)
     }
     _recvItem.labelEl.replaceChildren(nameSpan)
@@ -543,6 +613,87 @@ export const UI = {
   // Peer left while the dialog was open.
   closeOffer() {
     answerOffer(false)
+  },
+
+
+  setServerOnline(online) {
+    // Brief blips (e.g. leaving a room reconnects the socket) shouldn't flash a banner.
+    clearTimeout(_bannerTimer)
+    if (online) {
+      _serverOnline = true
+      renderServerBanner()
+    } else {
+      _bannerTimer = setTimeout(() => { _serverOnline = false; renderServerBanner() }, 1500)
+    }
+  },
+
+  // A pasted/dropped image or video, ours ('me') or theirs ('them').
+  // For our own, pass the file so it shows immediately.
+  mediaStarted({ key, from, displayName, name, size, file }) {
+    const div = document.createElement('div')
+    div.className = `msg ${from}`
+    const whoSpan = document.createElement('span')
+    whoSpan.className = 'who'
+    whoSpan.textContent = from === 'me' ? (_localName || 'You') : (displayName || 'Them')
+    const tsSpan = document.createElement('span')
+    tsSpan.className = 'ts'
+    tsSpan.textContent = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    const mediaEl = document.createElement('span')
+    mediaEl.className = 'media'
+    const captionEl = document.createElement('span')
+    captionEl.className = 'media-caption'
+    div.append(whoSpan, ' ', tsSpan, ':', mediaEl, captionEl)
+    messagesEl.appendChild(div)
+    const item = { el: div, captionEl, mediaEl, name, size }
+    _mediaItems.set(key, item)
+    mediaCaption(item, `${name} (${fmt(size)}) — ${t(from === 'me' ? 'sendingMedia' : 'receivingMedia')} 0%`)
+    if (file) UI.mediaShow(key, file)
+    messagesEl.scrollTop = messagesEl.scrollHeight
+  },
+
+  mediaProgress(key, percent) {
+    const item = _mediaItems.get(key)
+    if (!item) return
+    const from = item.el.classList.contains('me') ? 'sendingMedia' : 'receivingMedia'
+    mediaCaption(item, `${item.name} (${fmt(item.size)}) — ${t(from)} ${percent}%`)
+  },
+
+  // Show the media element (blob is the received data, or our own file).
+  mediaShow(key, blob) {
+    const item = _mediaItems.get(key)
+    if (!item) return
+    const url = trackUrl(blob)
+    const isVideo = blob.type.startsWith('video/')
+    const el = document.createElement(isVideo ? 'video' : 'img')
+    el.src = url
+    if (isVideo) { el.controls = true; el.preload = 'metadata'; el.playsInline = true }
+    else el.alt = item.name
+    // Click to enlarge in place (never opens the blob in a new tab).
+    if (!isVideo) el.addEventListener('click', () => item.mediaEl.classList.toggle('expanded'))
+    el.addEventListener('load', () => { messagesEl.scrollTop = messagesEl.scrollHeight }, { once: true })
+    item.mediaEl.replaceChildren(el)
+    item.url = url
+  },
+
+  mediaDone(key) {
+    const item = _mediaItems.get(key)
+    if (!item) return
+    item.captionEl.textContent = `${item.name} (${fmt(item.size)})`
+    if (item.url) {
+      const save = document.createElement('a')
+      save.href = item.url
+      save.download = item.name
+      save.textContent = t('save')
+      item.captionEl.append(' ', save)
+    }
+  },
+
+  mediaFailed(key, message) {
+    const item = _mediaItems.get(key)
+    if (!item) return
+    item.el.classList.add('media-failed')
+    item.mediaEl.replaceChildren()
+    mediaCaption(item, `${item.name} — ${t('mediaFailed')}: ${message}`)
   },
 
 }

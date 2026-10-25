@@ -27,11 +27,14 @@ The server only brokers the initial WebRTC handshake. Once connected, all traffi
 - Physical server compromise — no stored messages, files, or logs
 - Unwanted files — each incoming file needs the receiver to click Accept; nothing is sent before that, and a peer can't send more than it announced
 - Third parties learning who talks to whom — no Google STUN or other outside services
+- Room hijacking — only the two people in a room can exchange handshake messages; codes are random, single-use once two people have connected, and guessing is rate-limited
+- Other websites using your browser to reach the server — WebSocket connections from other origins are refused
+- Someone walking up to your screen — **Leave** (or pressing Esc three times quickly) drops the call and wipes the chat, media and received files from the tab
 
 **Not protected against:**
 - A compromised browser on either end
 - A malicious operator of the signaling server — it relays the handshake and could in principle man-in-the-middle it (no fingerprint verification yet)
-- Leaked room codes — a code works like a one-time password for its room; share it privately
+- A leaked room code before your friend uses it — share codes privately
 - Signaling server downtime (transfers in progress are unaffected, new connections cannot be established)
 - Your peer seeing your IP — inherent to WebRTC. On a Tailscale setup they see your tailnet (100.x) address, not your home IP
 
@@ -42,6 +45,16 @@ Every incoming file shows an Accept / Decline prompt first.
 - **With a download folder set** (Settings → Download folder, Chrome and Edge on desktop): files stream straight to disk as they arrive, so size is only limited by disk space. Existing files are never overwritten; a second `photo.jpg` becomes `photo (1).jpg`. The folder is remembered per browser; after a reload the browser may ask once to allow access again.
 - **Without one** (or in Firefox / Safari): the file is held in the tab's memory until you click **[Save]**, which hands it to the browser's normal download location. Fine for everyday files; very large ones (multiple GB) can crash the tab, and closing the tab before saving loses the file. The prompt warns about this for large files.
 
+## Chat, images and video
+
+Paste (Ctrl/Cmd+V) or drop images and videos into the chat panel to send them inline, up to 100 MB each. They travel on their own channel, so they show up right away even during a big file transfer. Supported: PNG, JPEG, GIF, WebP, AVIF, BMP, MP4, WebM, MOV, Ogg video. Anything else, or anything larger, becomes a normal file offer with an Accept prompt. SVG is deliberately not shown inline because it can contain scripts.
+
+Chat exports (txt / json / html) include text messages only.
+
+**Leave** in the top bar, or **Esc three times within a second**, ends the call and wipes everything from the tab. The other person sees you disconnect.
+
+If the server goes offline, a banner says so. An open call keeps working; just don't reload the page, and new rooms have to wait until the server is back.
+
 ## Running locally
 
 ```bash
@@ -51,6 +64,8 @@ node signaling.js
 ```
 
 Open two tabs at `http://localhost:7654`. One creates a room, the other joins with the code. With no `STUN_URLS` set, only peers on the same machine or network can connect, which is all you need for development.
+
+Run the tests with `npm test` in `server/`: signaling server behaviour (including a randomized check that room bookkeeping never drifts), plus the file-transfer and media protocols.
 
 ## Deploying on a Tailscale tailnet (recommended)
 
@@ -168,7 +183,9 @@ You want a line containing `typ srflx` with a **100.x** address. Then make a tes
 | Join seems to do nothing, then "Couldn't connect to the other person" | No usable STUN, or the policy blocks peer-to-peer UDP | Run the check in step 6. No `srflx` line: coturn isn't running/reachable (UDP 3478). `srflx` is 100.x on both sides: allow `group:ap` → `group:ap` in step 5 |
 | `srflx` shows a public IP, not 100.x | STUN is being reached outside Tailscale | Use the server's 100.x IP in `STUN_URLS` |
 | Console shows `ICE servers: []` or the wrong server | `STUN_URLS` not set in the running process | `daemon-reload`, then restart the service; confirm with `curl localhost:7654/config.json` |
-| "Room is full" | A third person already joined, or a very old server version | Create a new room; update and restart the server |
+| "Room is full" / "This room code has already been used" | Codes are single-use once two people have connected | Create a new room |
+| "Too many wrong codes" / "Try again in a minute" | Rate limit after repeated wrong codes (someone may be guessing) | Wait a minute and reload; check who has access if it keeps happening |
+| Nothing connects and the server log says "Rejected connection from origin" | An unusual proxy setup changes the Host header | Add your app's address to `ALLOWED_ORIGINS` (e.g. `https://myhost.your-tailnet.ts.net`) |
 | Page won't load on one device | Tailscale stopped on that device, or MagicDNS off | Start Tailscale ("Run unattended" on Windows keeps it up); enable "Use Tailscale DNS" |
 
 ## Deploying on a public VPS

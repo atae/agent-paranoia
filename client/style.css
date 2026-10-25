@@ -297,6 +297,40 @@ button:disabled { color: #aaa; cursor: default; }
 .btn-accept { background: #111; color: #fff; border-color: #111; }
 .btn-accept:hover:not(:disabled) { background: #333; }
 
+/* ── Server status banner ── */
+.server-banner {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 150;
+  padding: 6px 16px;
+  text-align: center;
+  font-size: 0.82rem;
+  background: #fff3cd;
+  border-bottom: 1px solid #e0c060;
+  color: #5a4500;
+}
+
+/* ── Leave button ── */
+.topbar-right { display: flex; align-items: center; gap: 10px; }
+.leave-btn { padding: 2px 10px; font-size: 0.8rem; }
+.leave-btn:hover:not(:disabled) { background: #fee; border-color: #c00; color: #c00; }
+
+/* ── Inline media in chat ── */
+.msg .media { display: block; margin: 4px 0 2px; }
+.msg .media img,
+.msg .media video {
+  display: block;
+  max-width: 100%;
+  max-height: 180px;
+  border: 1px solid #ddd;
+  cursor: zoom-in;
+}
+.msg .media.expanded img,
+.msg .media.expanded video { max-height: none; cursor: zoom-out; }
+.msg .media-caption { color: #777; font-size: 0.8em; }
+.msg .media-caption a { color: inherit; margin-left: 6px; }
+.msg.media-failed .media-caption { color: #c00; }
+
 /* ════════════════════════════════════════
    JP THEME  —  web 1.0 Japanese style
    ════════════════════════════════════════ */
@@ -459,4 +493,10 @@ body.jp .setting-name { color: #000080; }
 body.jp .offer-warn   { border-left-color: #cc0000; background: #ffffe0; }
 body.jp .btn-accept   { background: #000080; color: #ffffff; border: 2px outset #8888cc; }
 body.jp .btn-accept:hover:not(:disabled) { background: #0000aa; }
+
+/* Server banner, leave button and media in JP mode */
+body.jp .server-banner { background: #ffff99; border-bottom: 2px solid #cc0000; color: #cc0000; }
+body.jp .leave-btn { padding: 0 8px; font-size: 0.75rem; }
+body.jp .msg .media img,
+body.jp .msg .media video { border: 2px inset #808080; }
 

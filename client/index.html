@@ -8,6 +8,8 @@
 </head>
 <body>
 
+  <div id="serverBanner" class="server-banner" role="status" hidden></div>
+
   <div id="nameModal" class="modal-overlay">
     <div class="modal-box">
       <label for="nameInput">Display name</label>
@@ -48,7 +50,10 @@
   <div id="viewSession" class="view" hidden>
     <div class="topbar">
       <strong>Agent Paranoia</strong>
-      <span id="peerStatus" class="status-dot waiting">● Waiting for peer</span>
+      <span class="topbar-right">
+        <span id="peerStatus" class="status-dot waiting">● Waiting for peer</span>
+        <button id="leaveBtn" class="leave-btn" title="Leave and wipe this session (press Esc 3 times)">Leave</button>
+      </span>
     </div>
 
     <div class="chat-panel">

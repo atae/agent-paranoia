@@ -4,6 +4,7 @@ import { Chat }      from '/src/chat.js'
 import { Transfer }  from '/src/transfer.js'
 import { UI }        from '/src/ui.js'
 import { Downloads } from '/src/downloads.js'
+import { Media }     from '/src/media.js'
 
 // ── State ─────────────────────────────────────────────────────────────────
 let roomId = null
@@ -11,6 +12,8 @@ let peerDisplayName = null
 let transferInProgress = false
 const fileQueue = []
 let activeSend = false
+const mediaQueue = []   // { key, file }
+let activeMedia = false
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 function download(content, filename, mime) {
@@ -56,6 +59,46 @@ function enqueueFile(file) {
   processQueue()
 }
 
+// ── Pasted images / video ─────────────────────────────────────────────────
+// One at a time on the media channel, which is separate from the file
+// channel, so a pasted screenshot doesn't wait behind a large file.
+async function processMediaQueue() {
+  if (activeMedia || mediaQueue.length === 0) return
+  activeMedia = true
+  const { key, id, file } = mediaQueue.shift()
+  try {
+    await Media.send(id, file,
+      chunk => WebRTC.sendMediaChunk(chunk),
+      percent => percent === 100 ? UI.mediaDone(key) : UI.mediaProgress(key, percent),
+      () => WebRTC.mediaBufferedAmount())
+  } catch (err) {
+    UI.mediaFailed(key, err.message)
+  } finally {
+    activeMedia = false
+    processMediaQueue()
+  }
+}
+
+function sendPasted(files) {
+  for (const file of files) {
+    if (!Media.isInline(file)) { enqueueFile(file); continue }   // big or not an image/video: normal file offer
+    const id = Media.newId()
+    const key = `me-${id}`
+    UI.mediaStarted({ key, from: 'me', name: file.name || 'pasted', size: file.size, file })
+    mediaQueue.push({ key, id, file })
+  }
+  processMediaQueue()
+}
+
+function onMediaChunk(data) {
+  Media.handleIncoming(data, {
+    onStart:    m => UI.mediaStarted({ key: `them-${m.id}`, from: 'them', displayName: peerDisplayName, name: m.name, size: m.size }),
+    onProgress: (id, percent) => UI.mediaProgress(`them-${id}`, percent),
+    onComplete: m => { UI.mediaShow(`them-${m.id}`, m.blob); UI.mediaDone(`them-${m.id}`) },
+    onError:    (id, message) => UI.mediaFailed(`them-${id}`, message),
+  })
+}
+
 // ── WebRTC callbacks ──────────────────────────────────────────────────────
 function onChatMessage(msg) {
   const stored = Chat.addMessage('them', msg.text, {
@@ -99,9 +142,24 @@ function onFileChunk(data) {
 // and close any open accept dialog.
 function endTransfers() {
   fileQueue.length = 0
+  mediaQueue.length = 0
   transferInProgress = false
   Transfer.reset()
+  Media.reset()
   UI.closeOffer()
+}
+
+// Leave button / Esc ×3: drop the connection, leave the room, and wipe
+// everything from this tab — chat, received media and files, transfers.
+function leaveSession() {
+  roomId = null
+  peerDisplayName = null
+  WebRTC.close()
+  endTransfers()
+  Chat.clear()
+  UI.resetSession()
+  Signaling.reset()
+  UI.showHome()
 }
 
 function onConnectionChange(state) {
@@ -119,11 +177,15 @@ function onConnectionChange(state) {
 // ── UI callbacks ──────────────────────────────────────────────────────────
 UI.init({
   onCancelLobby() {
-    roomId = null
-    peerDisplayName = null
-    WebRTC.close()
-    Signaling.reset()
-    UI.showHome()
+    leaveSession()
+  },
+
+  onLeave() {
+    leaveSession()
+  },
+
+  onPasteFiles(files) {
+    sendPasted(files)
   },
 
   onCreateRoom() {
@@ -187,6 +249,11 @@ await Downloads.init()
 UI.setDownloadFolder(Downloads.folderName(), Downloads.supported)
 Signaling.connect(window.location.origin)
 
+// Server status: an open call doesn't need the server, but new rooms do.
+Signaling.on('connect', () => UI.setServerOnline(true))
+Signaling.on('disconnect', () => UI.setServerOnline(false))
+Signaling.on('connect_error', () => UI.setServerOnline(false))
+
 Signaling.on('room-created', ({ roomId: id }) => {
   roomId = id
   UI.showLobby(id)
@@ -196,7 +263,7 @@ Signaling.on('peer-joined', async ({ displayName }) => {
   peerDisplayName = displayName || null
   Chat.clear()
   UI.resetSession()
-  WebRTC.init(Signaling, roomId, onChatMessage, onFileChunk, onConnectionChange)
+  WebRTC.init(Signaling, roomId, onChatMessage, onFileChunk, onConnectionChange, onMediaChunk)
   await WebRTC.createOffer()
 })
 
@@ -205,7 +272,7 @@ Signaling.on('room-joined', ({ roomId: id, creatorDisplayName }) => {
   peerDisplayName = creatorDisplayName || null
   Chat.clear()
   UI.resetSession()
-  WebRTC.init(Signaling, roomId, onChatMessage, onFileChunk, onConnectionChange)
+  WebRTC.init(Signaling, roomId, onChatMessage, onFileChunk, onConnectionChange, onMediaChunk)
 })
 
 Signaling.on('room-error', ({ message }) => {

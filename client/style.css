@@ -331,6 +331,28 @@ button:disabled { color: #aaa; cursor: default; }
 .msg .media-caption a { color: inherit; margin-left: 6px; }
 .msg.media-failed .media-caption { color: #c00; }
 
+/* ── Safety code ── */
+.safety-bar {
+  border: 1px solid #ddd;
+  background: #fff;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  font-size: 0.85rem;
+}
+.safety-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.safety-title { font-weight: bold; }
+.safety-emoji { font-size: 1.6rem; letter-spacing: 0.25em; line-height: 1.2; }
+.safety-words { color: #555; margin-top: 2px; }
+.safety-text { margin-top: 6px; color: #444; }
+.safety-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.safety-actions button { padding: 4px 12px; font-size: 0.82rem; }
+.safety-bar.verified { border-color: #9c9; background: #f3fbf3; padding: 6px 12px; }
+.safety-bar.verified .safety-title { color: #1a7a1a; }
+.safety-bar.verified .safety-emoji { font-size: 1.1rem; }
+.safety-bar.danger { border-color: #c00; background: #fff0f0; }
+.safety-bar.danger .safety-title { color: #c00; }
+.safety-bar.muted { color: #777; padding: 6px 12px; }
+
 /* ════════════════════════════════════════
    JP THEME  —  web 1.0 Japanese style
    ════════════════════════════════════════ */
@@ -499,4 +521,12 @@ body.jp .server-banner { background: #ffff99; border-bottom: 2px solid #cc0000; 
 body.jp .leave-btn { padding: 0 8px; font-size: 0.75rem; }
 body.jp .msg .media img,
 body.jp .msg .media video { border: 2px inset #808080; }
+
+/* Safety code in JP mode */
+body.jp .safety-bar { border: 2px inset #808080; background: #fffff0; }
+body.jp .safety-title { color: #000080; }
+body.jp .safety-bar.verified { background: #f0fff0; border-color: #008000; }
+body.jp .safety-bar.verified .safety-title { color: #006600; }
+body.jp .safety-bar.danger { background: #ffeeee; border: 2px solid #cc0000; }
+body.jp .safety-bar.danger .safety-title { color: #cc0000; }
 

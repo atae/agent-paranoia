@@ -225,6 +225,16 @@ export const WebRTC = {
     return sendWithBackpressure(_mediaChannel, chunk, 'media')
   },
 
+  // The negotiated session descriptions, for the safety code: each contains
+  // the DTLS fingerprint of the key that side is actually using.
+  descriptions() {
+    return {
+      local: _pc?.currentLocalDescription?.sdp ?? null,
+      localType: _pc?.currentLocalDescription?.type ?? null,
+      remote: _pc?.currentRemoteDescription?.sdp ?? null,
+    }
+  },
+
   // Bytes queued on the file channel but not yet handed to the network.
   fileBufferedAmount() {
     return _fileChannel?.readyState === 'open' ? _fileChannel.bufferedAmount : 0

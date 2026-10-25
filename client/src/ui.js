@@ -27,6 +27,7 @@ const clearFolderBtn     = document.getElementById('clearFolderBtn')
 const offerModal         = document.getElementById('offerModal')
 const serverBanner       = document.getElementById('serverBanner')
 const leaveBtn           = document.getElementById('leaveBtn')
+const safetyBar          = document.getElementById('safetyBar')
 
 const PROGRESS_INTERVAL_MS = 250
 
@@ -93,6 +94,22 @@ const TX = {
   sendingMedia:    { en: 'sending',                       jp: '送信中' },
   receivingMedia:  { en: 'receiving',                     jp: '受信中' },
   mediaFailed:     { en: 'failed',                        jp: '失敗' },
+  safetyCode:      { en: 'Safety code',                   jp: '安全確認コード' },
+  safetyWorking:   { en: 'Safety code: working…',         jp: '安全確認コード：計算中…' },
+  safetyMatch:     { en: 'They match',                    jp: '一致した' },
+  safetyNoMatch:   { en: "They don't match",              jp: '一致しない' },
+  safetyVerified:  { en: '✓ Safety code verified',        jp: '✓ 安全確認コード照合済み' },
+  safetyWarnTitle: { en: '⚠ Possible interception',       jp: '⚠ 傍受の可能性' },
+  safetyMismatch:  { en: "Your codes don't match. Someone may be intercepting this connection. Don't send anything sensitive: leave and start a new room.",
+                     jp: 'コードが一致しません。この接続が傍受されている可能性があります。大事な内容は送らず、退出して新しい部屋を作ってください。' },
+  safetyProtocol:  { en: 'The safety check failed because the other side broke its rules. Treat this connection as compromised: leave and start a new room.',
+                     jp: '相手側が手順を守らなかったため、安全確認に失敗しました。この接続は危険とみなし、退出して新しい部屋を作ってください。' },
+  leaveNow:        { en: 'Leave now',                     jp: '今すぐ退出' },
+  safetyNeedsHttps:{ en: 'Safety code unavailable: it needs the page to be opened over HTTPS.',
+                     jp: '安全確認コードを利用できません（HTTPSで開く必要があります）。' },
+  safetyNoReply:   { en: "Safety code unavailable: the other side didn't respond (an older version of the app?).",
+                     jp: '安全確認コードを利用できません。相手から応答がありません（古いバージョンの可能性）。' },
+  theOtherPerson:  { en: 'the other person',              jp: '相手' },
 }
 
 // Above this size, warn before holding a file in memory.
@@ -133,6 +150,7 @@ function applyTranslations() {
   leaveBtn.title = t('leaveTitle')
   renderFolder()
   renderServerBanner()
+  renderSafety()
 }
 
 // ── State ─────────────────────────────────────────────────────────────────
@@ -147,6 +165,7 @@ let _folderName = null
 let _folderSupported = false
 let _offerResolve = null   // pending answer for the open incoming-file dialog
 let _serverOnline = true
+let _safety = { state: 'hidden', code: null, peer: null }
 let _bannerTimer = null
 const _mediaItems = new Map()   // key → { el, captionEl, mediaEl, name }
 const _objectUrls = new Set()   // revoked when the session is wiped
@@ -181,6 +200,53 @@ function renderServerBanner() {
   serverBanner.hidden = _serverOnline
   if (_serverOnline) return
   serverBanner.textContent = t(!views.session.hidden && _peerState === 'connected' ? 'serverOfflineInCall' : 'serverOffline')
+}
+
+function compareHint(peer) {
+  const jp = document.body.classList.contains('jp')
+  const who = peer || t('theOtherPerson')
+  return jp
+    ? `${who}と、このアプリ以外の方法（通話・対面・別のメッセンジャー）でコードを読み合わせてください。両方の画面が同じなら、間に誰もいません。`
+    : `Read this out to ${who} outside this app: on a call, in person, or in another messenger. If both screens show the same code, nobody is in the middle.`
+}
+
+function renderSafety() {
+  const { state, code, peer } = _safety
+  const jp = document.body.classList.contains('jp')
+  safetyBar.hidden = state === 'hidden'
+  if (state === 'hidden') return
+  const $ = id => document.getElementById(id)
+  const emoji = code ? code.map(s => s.emoji).join(' ') : ''
+  const words = code ? code.map(s => jp ? s.jp : s.en).join(jp ? '・' : ' · ') : ''
+  const show = (el, on) => { el.hidden = !on }
+
+  safetyBar.className = 'safety-bar' +
+    (state === 'verified' ? ' verified' : state === 'mismatch' || state === 'failed' ? ' danger' : state === 'ready' ? '' : ' muted')
+  $('safetyTitle').textContent = {
+    working: t('safetyWorking'), ready: t('safetyCode'), verified: t('safetyVerified'),
+    mismatch: t('safetyWarnTitle'), failed: t('safetyWarnTitle'),
+    https: t('safetyNeedsHttps'), noreply: t('safetyNoReply'),
+  }[state]
+  $('safetyEmoji').textContent = state === 'ready' || state === 'verified' || state === 'mismatch' ? emoji : ''
+  $('safetyWords').textContent = state === 'ready' ? words : ''
+  $('safetyText').textContent =
+    state === 'ready' ? compareHint(peer) :
+    state === 'mismatch' ? t('safetyMismatch') :
+    state === 'failed' ? t('safetyProtocol') : ''
+  show($('safetyWords'), state === 'ready')
+  show($('safetyText'), ['ready', 'mismatch', 'failed'].includes(state))
+  show($('safetyActions'), ['ready', 'mismatch', 'failed'].includes(state))
+  show($('safetyMatchBtn'), state === 'ready')
+  show($('safetyMismatchBtn'), state === 'ready')
+  show($('safetyLeaveBtn'), state === 'mismatch' || state === 'failed')
+  $('safetyMatchBtn').textContent = t('safetyMatch')
+  $('safetyMismatchBtn').textContent = t('safetyNoMatch')
+  $('safetyLeaveBtn').textContent = t('leaveNow')
+}
+
+function setSafety(state, extra = {}) {
+  _safety = { ..._safety, ...extra, state }
+  renderSafety()
 }
 
 function trackUrl(blob) {
@@ -356,6 +422,11 @@ export const UI = {
     document.getElementById('chooseFolderBtn').addEventListener('click', () => _cbs.onChooseFolder?.())
     clearFolderBtn.addEventListener('click', () => _cbs.onClearFolder?.())
 
+    // Safety code buttons
+    document.getElementById('safetyMatchBtn').addEventListener('click', () => setSafety('verified'))
+    document.getElementById('safetyMismatchBtn').addEventListener('click', () => setSafety('mismatch'))
+    document.getElementById('safetyLeaveBtn').addEventListener('click', () => _cbs.onLeave?.())
+
     // Leave (wipes the session). Esc three times within a second does the
     // same from anywhere — enough that it never happens by accident.
     leaveBtn.addEventListener('click', () => _cbs.onLeave?.())
@@ -417,6 +488,7 @@ export const UI = {
     _sendItems.length = 0
     _recvItem = null
     _mediaItems.clear()
+    setSafety('hidden', { code: null, peer: null })
     for (const url of _objectUrls) URL.revokeObjectURL(url)
     _objectUrls.clear()
     document.getElementById('roomInput').value = ''
@@ -695,5 +767,13 @@ export const UI = {
     item.mediaEl.replaceChildren()
     mediaCaption(item, `${item.name} — ${t('mediaFailed')}: ${message}`)
   },
+
+
+  // Safety code panel: 'working' → 'ready' (code shown) → 'verified' / 'mismatch';
+  // 'failed' if the other side cheats; 'https' / 'noreply' when unavailable.
+  safetyWorking()            { setSafety('working', { code: null }) },
+  safetyReady(code, peer)    { setSafety('ready', { code, peer }) },
+  safetyFailed()             { setSafety('failed') },
+  safetyUnavailable(reason)  { setSafety(reason === 'https' ? 'https' : 'noreply') },
 
 }

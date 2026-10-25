@@ -29,11 +29,12 @@ The server only brokers the initial WebRTC handshake. Once connected, all traffi
 - Third parties learning who talks to whom — no Google STUN or other outside services
 - Room hijacking — only the two people in a room can exchange handshake messages; codes are random, single-use once two people have connected, and guessing is rate-limited
 - Other websites using your browser to reach the server — WebSocket connections from other origins are refused
+- A compromised server listening in — compare the **safety code** (below); if it matches, nobody is in the middle
 - Someone walking up to your screen — **Leave** (or pressing Esc three times quickly) drops the call and wipes the chat, media and received files from the tab
 
 **Not protected against:**
 - A compromised browser on either end
-- A malicious operator of the signaling server — it relays the handshake and could in principle man-in-the-middle it (no fingerprint verification yet)
+- A malicious operator of the signaling server *if you skip the safety code* — the server relays the handshake, so without comparing codes you're trusting it not to sit in the middle
 - A leaked room code before your friend uses it — share codes privately
 - Signaling server downtime (transfers in progress are unaffected, new connections cannot be established)
 - Your peer seeing your IP — inherent to WebRTC. On a Tailscale setup they see your tailnet (100.x) address, not your home IP
@@ -44,6 +45,17 @@ Every incoming file shows an Accept / Decline prompt first.
 
 - **With a download folder set** (Settings → Download folder, Chrome and Edge on desktop): files stream straight to disk as they arrive, so size is only limited by disk space. Existing files are never overwritten; a second `photo.jpg` becomes `photo (1).jpg`. The folder is remembered per browser; after a reload the browser may ask once to allow access again.
 - **Without one** (or in Firefox / Safari): the file is held in the tab's memory until you click **[Save]**, which hands it to the browser's normal download location. Fine for everyday files; very large ones (multiple GB) can crash the tab, and closing the tab before saving loses the file. The prompt warns about this for large files.
+
+## Safety code
+
+After you connect, both screens show five emoji, like `🦊 🌲 🔔 🌙 🔑` (with names, so you can read them out). Compare them with the other person **outside the app**: on a call, in person, or in another messenger. Not in this chat, since an attacker in the middle could fake that.
+
+- **Same code:** nobody is in the middle, not even a compromised server. Click **They match**.
+- **Different code:** someone may be intercepting. Click **They don't match**, send nothing sensitive, and leave.
+
+How it works: each browser's encryption key has a fingerprint, and those are exchanged through the server. A server in the middle would have to give each of you a different fingerprint, so the codes come out different. To stop an attacker from trying many keys until the short codes happen to match, the two browsers also exchange random numbers using a commitment (each locks in its number before seeing the other's), the same technique as ZRTP for encrypted calls. That leaves an attacker one blind guess per call, about 1 in a billion. A new code is made for every call.
+
+It needs the page served over HTTPS (Tailscale Serve does this) or `localhost`.
 
 ## Chat, images and video
 
@@ -65,7 +77,7 @@ node signaling.js
 
 Open two tabs at `http://localhost:7654`. One creates a room, the other joins with the code. With no `STUN_URLS` set, only peers on the same machine or network can connect, which is all you need for development.
 
-Run the tests with `npm test` in `server/`: signaling server behaviour (including a randomized check that room bookkeeping never drifts), plus the file-transfer and media protocols.
+Run the tests with `npm test` in `server/`: signaling server behaviour (including a randomized check that room bookkeeping never drifts), plus the file-transfer, media and safety-code protocols (including simulated man-in-the-middle attacks).
 
 ## Deploying on a Tailscale tailnet (recommended)
 

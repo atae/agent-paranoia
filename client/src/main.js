@@ -5,6 +5,7 @@ import { Transfer }  from '/src/transfer.js'
 import { UI }        from '/src/ui.js'
 import { Downloads } from '/src/downloads.js'
 import { Media }     from '/src/media.js'
+import { createSafetyCheck, fingerprintFromSdp, safetyCodeSupported, SafetyProtocolError } from '/src/safety.js'
 
 // ── State ─────────────────────────────────────────────────────────────────
 let roomId = null
@@ -99,8 +100,48 @@ function onMediaChunk(data) {
   })
 }
 
+// ── Safety code ───────────────────────────────────────────────────────────
+let safety = null
+let safetyTimer = null
+
+function startSafetyCheck() {
+  stopSafetyCheck()
+  UI.safetyWorking()
+  if (!safetyCodeSupported()) { UI.safetyUnavailable('https'); return }
+  const d = WebRTC.descriptions()
+  const check = createSafetyCheck({
+    // The side that made the offer commits first; the protocol is safe either way.
+    role: d.localType === 'offer' ? 'committer' : 'responder',
+    localFp: fingerprintFromSdp(d.local),
+    remoteFp: fingerprintFromSdp(d.remote),
+    send: m => WebRTC.sendChat(m),
+  })
+  safety = check
+  safetyTimer = setTimeout(() => { if (safety === check) UI.safetyUnavailable('noreply') }, 15_000)
+  check.result.then(
+    code => { if (safety === check) { clearTimeout(safetyTimer); UI.safetyReady(code, peerDisplayName) } },
+    err  => {
+      if (safety !== check) return
+      clearTimeout(safetyTimer)
+      if (err instanceof SafetyProtocolError) UI.safetyFailed()
+      else UI.safetyUnavailable('noreply')
+    },
+  )
+  check.start()
+}
+
+function stopSafetyCheck() {
+  clearTimeout(safetyTimer)
+  safety = null
+}
+
 // ── WebRTC callbacks ──────────────────────────────────────────────────────
 function onChatMessage(msg) {
+  // Safety-check messages share the chat channel; never show them as chat.
+  if (typeof msg?.type === 'string') {
+    safety?.handle(msg)
+    return
+  }
   const stored = Chat.addMessage('them', msg.text, {
     displayName: msg.displayName,
     timestamp: msg.timestamp,
@@ -152,6 +193,7 @@ function endTransfers() {
 // Leave button / Esc ×3: drop the connection, leave the room, and wipe
 // everything from this tab — chat, received media and files, transfers.
 function leaveSession() {
+  stopSafetyCheck()
   roomId = null
   peerDisplayName = null
   WebRTC.close()
@@ -166,7 +208,9 @@ function onConnectionChange(state) {
   if (state === 'connected') {
     UI.showSession()
     UI.setPeerStatus('connected', peerDisplayName)
+    startSafetyCheck()
   } else {
+    stopSafetyCheck()
     // Without this, a join that never connects looks like nothing happened.
     if (state === 'failed') alert("Couldn't connect to the other person. Check that you're both on Tailscale and try joining again.")
     UI.setPeerStatus('disconnected', null)
